@@ -5,6 +5,8 @@
 #include <iostream>
 #include <sys/time.h>
 
+#define EPS 1e-4
+
 
 #define CHECK_CUDA_ERROR(value) check((value), #value, __FILE__, __LINE__)
 void check(cudaError_t error, char const *func, char const *file, int line) {
@@ -30,6 +32,7 @@ void check_last(char const *file, int line) {
 int get_kernel_input(int argc, char **argv) {
     if (argc != 2) {
         std::cerr << "Please select a kernel (range 0 - *, 0 for NVIDIA cuBLAS)" << std::endl;
+        exit(EXIT_FAILURE);
     }
 
     // Get kernel number.
@@ -53,4 +56,20 @@ void randomize_matrix(float *matrix, size_t N) {
         value = (rand() % 2 == 0) ? value : value * (-1.);
         matrix[i] = value;
     }
+}
+
+
+bool verify_matrix(float *matrix_1, float *matrix_2, size_t N) {
+    double diff{0.0};
+
+    for (size_t i{0}; i < N; ++i) {
+        diff = std::fabs(matrix_1[i] - matrix_2[i]);
+        if (isnan(diff) || diff > EPS) {
+            printf(
+                "Divergence encountered with at %zu with diff %5.2f; expected: %5.2f but actual: %5.2f\n",
+                i, diff, matrix_1[i], matrix_2[i]);
+            return false;
+        }
+    }    
+    return true;
 }

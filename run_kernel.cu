@@ -1,6 +1,7 @@
 #include <cublas_v2.h>
-#include <stdio.h>
 #include <iostream>
+#include <stdio.h>
+#include <string>
 #include <vector>
 
 #include "src/utils.cuh"
@@ -8,8 +9,8 @@
 
 
 void prepare_matrices(
-    float *A, float *B, float *C, float *C_ref,
-    float *A_d, float *B_d, float *C_d, float *C_ref_d,
+    float *&A, float *&B, float *&C, float *&C_ref,
+    float *&A_d, float *&B_d, float *&C_d, float *&C_ref_d,
     size_t matrix_size
 ) {
     A     = (float *)malloc(sizeof(float) * matrix_size * matrix_size);
@@ -34,8 +35,8 @@ void prepare_matrices(
 
 
 void free_matrices(
-    float *A, float *B, float *C, float *C_ref,
-    float *A_d, float *B_d, float *C_d, float *C_ref_d
+    float *&A, float *&B, float *&C, float *&C_ref,
+    float *&A_d, float *&B_d, float *&C_d, float *&C_ref_d
 ) {
     free(A);
     free(B);
@@ -51,6 +52,9 @@ void free_matrices(
 
 int main(int argc, char **argv) {
     int kernel_num = get_kernel_input(argc, argv);
+
+    // Set CUDA context.
+    CHECK_CUDA_ERROR(cudaSetDevice(0));
     
     // Create a handle to be used for using cublas.
     cublasHandle_t cublas_handle;
@@ -60,7 +64,7 @@ int main(int argc, char **argv) {
     }
     
     // Generate matrices.
-    std::vector<size_t> const MATRIX_SIZE = {128, 256, 512, 1024, 2048, 4096, 8192};
+    std::vector<size_t> const MATRIX_SIZE = {128, 256, 512, 1024, 2048, 4096, 8192, 16384};
 
     size_t const max_matrix_size = MATRIX_SIZE[MATRIX_SIZE.size() - 1];
     std::cout << "Max matrix size: " << max_matrix_size << std::endl;
@@ -83,7 +87,7 @@ int main(int argc, char **argv) {
     CHECK_CUDA_ERROR(cudaStreamCreate(&stream));
 
     for (size_t size : MATRIX_SIZE) {
-        float m{size}, n{size}, k{size};
+        size_t m{size}, n{size}, k{size};
 
         std::cout << "dimensions(m=n=k) " << m
                   << ", alpha: " << alpha
@@ -102,6 +106,9 @@ int main(int argc, char **argv) {
                 std::cerr << "The kernel function implementation is not correct compared to cuBLAS results." << std::endl;
                 exit(EXIT_FAILURE);
             }
+        } else {
+            // Run kernel 0 as a warmup.
+            run_kernel(0, m, n, k, alpha, A_d, B_d, beta, C_ref_d, cublas_handle);
         }
 
         // Measure elapsed time.
@@ -120,11 +127,12 @@ int main(int argc, char **argv) {
 
         float mean_elapsed_time_ms{elapsed_time_ms / repeat_times};
         size_t flops{2 * m * n * k};
-        float gflops{flops * 1.0e-9 / mean_elapsed_time_ms};
+        float gflops{flops * 1.0e-6f / mean_elapsed_time_ms};
 
         printf(
-            "Size: %u\t, verage elapsed time: (%7.3f) ms, performance: (%7.1f) GFLOPS.",
-            m, mean_elapsed_time_ms, gflops);
+            "average elapsed time: (%7.3f) ms, performance: (%7.1f) GFLOPS.\n",
+            mean_elapsed_time_ms, gflops);
+        std::cout << std::string(50, '=') << std::endl;
         fflush(stdout);
 
         // Make C_d and C_ref_d equal to prepare for another iteration.

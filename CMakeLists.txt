@@ -13,9 +13,14 @@ set(CUDA_COMPUTE_CAPABILITY 120)
 
 # In debug mode, add debug symbols to device code.
 # This disables most optimizations and kills performance.
-# add_compile_options("$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
+add_compile_options(
+    $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>
+    $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:--source-in-ptx>
+    $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CXX>>:-g>
+    $<$<CONFIG:Release>:--generate-line-info>
+
+)
 # add_compile_options("--ptxas-options=-v")
-add_compile_options("--generate-line-info")
 
 # Configure header file search paths.
 include_directories(${CUDA_INCLUDE_DIRS})
