@@ -1,11 +1,10 @@
-#include <cublas_v2.h>
 #include <iostream>
 #include <stdio.h>
 #include <string>
 #include <vector>
 
+#include "src/runner.cuh"
 #include "src/utils.cuh"
-#include "src/kernels.cuh"
 
 
 void prepare_matrices(
@@ -64,7 +63,8 @@ int main(int argc, char **argv) {
     }
     
     // Generate matrices.
-    std::vector<size_t> const MATRIX_SIZE = {128, 256, 512, 1024, 2048, 4096, 8192, 16384};
+    // std::vector<size_t> const MATRIX_SIZE = {128, 256, 512, 1024, 2048, 4096, 8192};
+    std::vector<size_t> const MATRIX_SIZE = {8192};
 
     size_t const max_matrix_size = MATRIX_SIZE[MATRIX_SIZE.size() - 1];
     std::cout << "Max matrix size: " << max_matrix_size << std::endl;
@@ -87,28 +87,28 @@ int main(int argc, char **argv) {
     CHECK_CUDA_ERROR(cudaStreamCreate(&stream));
 
     for (size_t size : MATRIX_SIZE) {
-        size_t m{size}, n{size}, k{size};
+        size_t M{size}, N{size}, K{size};
 
-        std::cout << "dimensions(m=n=k) " << m
+        std::cout << "dimensions(m=n=k) " << M
                   << ", alpha: " << alpha
                   << ", beta: "  << beta << std::endl;
         
         // Verify the correctness by comparing against cuBLAS if kernel number != 0.
         if (kernel_num != 0) {
-            run_kernel(0, m, n, k, alpha, A_d, B_d, beta, C_ref_d, cublas_handle);
-            run_kernel(kernel_num, m, n, k, alpha, A_d, B_d, beta, C_d, cublas_handle);
+            run_kernel(0, M, N, K, alpha, A_d, B_d, beta, C_ref_d, cublas_handle);
+            run_kernel(kernel_num, M, N, K, alpha, A_d, B_d, beta, C_d, cublas_handle);
             CHECK_LAST_CUDA_ERROR();
 
-            CHECK_CUDA_ERROR(cudaMemcpy(C_ref, C_ref_d, sizeof(float) * m * n, cudaMemcpyDeviceToHost));
-            CHECK_CUDA_ERROR(cudaMemcpy(C, C_d, sizeof(float) * m * n, cudaMemcpyDeviceToHost));
+            CHECK_CUDA_ERROR(cudaMemcpy(C_ref, C_ref_d, sizeof(float) * M * N, cudaMemcpyDeviceToHost));
+            CHECK_CUDA_ERROR(cudaMemcpy(C, C_d, sizeof(float) * M * N, cudaMemcpyDeviceToHost));
 
-            if (!verify_matrix(C_ref, C, m * n)) {
+            if (!verify_matrix(C_ref, C, M * N)) {
                 std::cerr << "The kernel function implementation is not correct compared to cuBLAS results." << std::endl;
                 exit(EXIT_FAILURE);
             }
         } else {
             // Run kernel 0 as a warmup.
-            run_kernel(0, m, n, k, alpha, A_d, B_d, beta, C_ref_d, cublas_handle);
+            run_kernel(0, M, N, K, alpha, A_d, B_d, beta, C_ref_d, cublas_handle);
         }
 
         // Measure elapsed time.
@@ -117,7 +117,7 @@ int main(int argc, char **argv) {
         
         // Run the kernel repeatedly; since we already verify the results, we don't reset C here to save time.
         for (int i{0}; i < repeat_times; ++i)
-            run_kernel(kernel_num, m, n, k, alpha, A_d, B_d, beta, C_d, cublas_handle);
+            run_kernel(kernel_num, M, N, K, alpha, A_d, B_d, beta, C_d, cublas_handle);
 
         CHECK_CUDA_ERROR(cudaEventRecord(end, stream));
         CHECK_CUDA_ERROR(cudaEventSynchronize(end));
@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
         CHECK_LAST_CUDA_ERROR();
 
         float mean_elapsed_time_ms{elapsed_time_ms / repeat_times};
-        size_t flops{2 * m * n * k};
+        size_t flops{2 * M * N * K};
         float gflops{flops * 1.0e-6f / mean_elapsed_time_ms};
 
         printf(
@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
         fflush(stdout);
 
         // Make C_d and C_ref_d equal to prepare for another iteration.
-        CHECK_CUDA_ERROR(cudaMemcpy(C_d, C_ref_d, sizeof(float) * m * n, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA_ERROR(cudaMemcpy(C_d, C_ref_d, sizeof(float) * M * N, cudaMemcpyDeviceToDevice));
     }
 
     free_matrices(A, B, C, C_ref, A_d, B_d, C_d, C_ref_d);
