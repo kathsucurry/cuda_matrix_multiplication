@@ -7,7 +7,7 @@
 
 #define EPS 1e-4
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
-#define KERNEL_NUM 3
+#define KERNEL_NUM 10
 #define CHECK_CUDA_ERROR(value) check_cuda_error((value), #value, __FILE__, __LINE__)
 #define CHECK_LAST_CUDA_ERROR() check_last_cuda_error(__FILE__, __LINE__)
 
