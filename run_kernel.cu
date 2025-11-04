@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
         CHECK_LAST_CUDA_ERROR();
 
         float mean_elapsed_time_ms{elapsed_time_ms / repeat_times};
-        size_t flops{2 * M * N * K};
+        size_t flops{2 * M * N * K + 2 * M * N};
         float gflops{flops * 1.0e-6f / mean_elapsed_time_ms};
 
         printf(

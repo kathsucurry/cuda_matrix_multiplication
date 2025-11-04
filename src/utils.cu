@@ -28,7 +28,7 @@ int get_kernel_input(int argc, char **argv) {
 
     // Get kernel number.
     int kernel_num{std::stoi(argv[1])};
-    if (kernel_num < 0 || kernel_num > 1) {
+    if (kernel_num < 0 || kernel_num >= KERNEL_NUM) {
         std::cerr << "A valid kernel number should be between 0 and * inclusive." << std::endl;
         exit(EXIT_FAILURE);
     }
