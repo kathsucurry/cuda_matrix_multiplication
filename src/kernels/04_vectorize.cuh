@@ -23,26 +23,24 @@ __global__ void vectorize(int M, int N, int K, float alpha, float *A, float *B, 
     size_t const B_block_trans_row_idx = threadIdx.x / (BK / 4);
 
     for (size_t k_offset{0}; k_offset < K; k_offset += BK) {
-        if (threadIdx.x < blockDim.x / 4) {
-            size_t const A_col_idx{(threadIdx.x % (BK / 4)) * 4 + k_offset};
-            reinterpret_cast<float4 *>(&As[threadIdx.x * 4])[0] =
-                reinterpret_cast<float4 *>(&A[(block_row_offset + A_block_row_idx) * K + A_col_idx])[0];
-            
-            // size_t const B_row_idx{threadIdx.x / BN};
-            size_t const B_block_trans_col_idx{(threadIdx.x % (BK / 4)) * 4};
-            float4 tmp{
-                reinterpret_cast<float4 *>(
-                    &B[
-                        (block_col_offset + B_block_trans_row_idx) * K +
-                        B_block_trans_col_idx + k_offset
-                    ])[0]
-            };
-            // Transpose.
-            Bs[(B_block_trans_col_idx + 0) * BN + B_block_trans_row_idx] = tmp.x;
-            Bs[(B_block_trans_col_idx + 1) * BN + B_block_trans_row_idx] = tmp.y;
-            Bs[(B_block_trans_col_idx + 2) * BN + B_block_trans_row_idx] = tmp.z;
-            Bs[(B_block_trans_col_idx + 3) * BN + B_block_trans_row_idx] = tmp.w;
-        }
+        size_t const A_col_idx{(threadIdx.x % (BK / 4)) * 4 + k_offset};
+        reinterpret_cast<float4 *>(&As[threadIdx.x * 4])[0] =
+            reinterpret_cast<float4 *>(&A[(block_row_offset + A_block_row_idx) * K + A_col_idx])[0];
+        
+        // size_t const B_row_idx{threadIdx.x / BN};
+        size_t const B_block_trans_col_idx{(threadIdx.x % (BK / 4)) * 4};
+        float4 tmp{
+            reinterpret_cast<float4 *>(
+                &B[
+                    (block_col_offset + B_block_trans_row_idx) * K +
+                    B_block_trans_col_idx + k_offset
+                ])[0]
+        };
+        // Transpose.
+        Bs[(B_block_trans_col_idx + 0) * BN + B_block_trans_row_idx] = tmp.x;
+        Bs[(B_block_trans_col_idx + 1) * BN + B_block_trans_row_idx] = tmp.y;
+        Bs[(B_block_trans_col_idx + 2) * BN + B_block_trans_row_idx] = tmp.z;
+        Bs[(B_block_trans_col_idx + 3) * BN + B_block_trans_row_idx] = tmp.w;
         __syncthreads();
 
         // Execute the dot product.

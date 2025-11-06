@@ -61,12 +61,11 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
     // BM: the size of block vertically; BN: the size of block horizontally. 
     size_t const BM{BLOCK_DIM}, BN{BLOCK_DIM};
     // TM, TN: the number of rows, columns processed by each thread, respectively.
-    size_t const TM{4}, TN{4};
+    size_t const TM{8}, TN{8};
 
-    // The total number of threads per block corresponds to the number of cells in shared memory:
-    // BM * BK = BN * BK = BM * BN / (TM * TN).
-    // So BK = BM * BN / (TM * TN * BM) given that BM = BN.
-    size_t const BK{BN / (TM * TN)};
+    // With vectorization (using float4), we now do TM * TN = 4 * number of threads.
+    // So BK is now BM * 4 / (TM * TN).
+    size_t const BK{BN * 4 / (TM * TN)};
 
     static_assert(BK % 4 == 0);
     static_assert((TM % 4 == 0) && (TN % 4 == 0));
