@@ -4,9 +4,7 @@
 
 #include "utils.cuh"
 
-#include "kernels/00_naive.cuh"
-#include "kernels/01_shared_memory_block.cuh"
-#include "kernels/02_2d_thread_coarsening.cuh"
-
-
-
+#include "kernels/01_naive.cuh"
+#include "kernels/02_shared_memory_block.cuh"
+#include "kernels/03_2d_thread_coarsening.cuh"
+#include "kernels/04_vectorize.cuh"

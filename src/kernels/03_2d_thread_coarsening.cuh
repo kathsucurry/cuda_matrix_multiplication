@@ -19,6 +19,7 @@ __global__ void thread_coarsening_2d(int M, int N, int K, float alpha, float *A,
     size_t const block_row_offset{blockIdx.y * BM};
     size_t const block_col_offset{blockIdx.x * BN};
 
+    // For storing into shared memory.
     size_t const A_row_idx = block_row_offset + threadIdx.x / BK;
     size_t const B_col_idx = block_col_offset + threadIdx.x % BN;
 

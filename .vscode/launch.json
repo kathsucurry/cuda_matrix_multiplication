@@ -6,7 +6,7 @@
             "type": "cuda-gdb",
             "request": "launch",
             "program": "${workspaceFolder}/build/matmul",
-            "args": ["0"]
+            "args": ["4"]
         },
         {
             "name": "CUDA C++: Attach",

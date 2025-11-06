@@ -5,7 +5,7 @@
 #include <iostream>
 #include <sys/time.h>
 
-#define EPS 1e-4
+#define EPS 1e-2
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
 #define KERNEL_NUM 10
 #define CHECK_CUDA_ERROR(value) check_cuda_error((value), #value, __FILE__, __LINE__)

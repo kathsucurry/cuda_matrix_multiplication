@@ -46,6 +46,7 @@ void randomize_matrix(float *matrix, size_t N) {
         float value = (float)(rand() % 5) + 0.01 * (rand() % 5);
         value = (rand() % 2 == 0) ? value : value * (-1.);
         matrix[i] = value;
+        // matrix[i] = (i % 128) + 1;
     }
 }
 
@@ -57,7 +58,7 @@ bool verify_matrix(float *matrix_1, float *matrix_2, size_t N) {
         diff = std::fabs(matrix_1[i] - matrix_2[i]);
         if (isnan(diff) || diff > EPS) {
             printf(
-                "Divergence encountered with at %zu with diff %5.2f; expected: %5.2f but actual: %5.2f\n",
+                "Divergence encountered with at %zu with diff %5.4f; expected: %5.4f but actual: %5.4f\n",
                 i, diff, matrix_1[i], matrix_2[i]);
             return false;
         }

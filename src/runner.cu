@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include "kernels.cuh"
 #include "runner.cuh"
 
@@ -54,6 +56,28 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
 }
 
 
+void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    size_t const BLOCK_DIM{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    size_t const BM{BLOCK_DIM}, BN{BLOCK_DIM};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    size_t const TM{4}, TN{4};
+
+    // The total number of threads per block corresponds to the number of cells in shared memory:
+    // BM * BK = BN * BK = BM * BN / (TM * TN).
+    // So BK = BM * BN / (TM * TN * BM) given that BM = BN.
+    size_t const BK{BN / (TM * TN)};
+
+    static_assert(BK % 4 == 0);
+    static_assert((TM % 4 == 0) && (TN % 4 == 0));
+
+    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
+    dim3 block_dim(BM * BN / (TM * TN));
+    vectorize<BM, BN, BK, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
 void run_kernel(
     int kernel_num, int M, int N, int K, float alpha, float *A, float *B,
     float beta, float *C, cublasHandle_t handle
@@ -70,6 +94,10 @@ void run_kernel(
             break;
         case 3:
             run_2d_thread_coarsening(M, N, K, alpha, A, B, beta, C);
+            break;
+        case 4:
+            assert((N % 4 == 0) && (K % 4 == 0));
+            run_vectorize(M, N, K, alpha, A, B, beta, C);
             break;
         default:
             throw std::invalid_argument("Invalid kernel number.");
