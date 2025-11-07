@@ -44,10 +44,11 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
     // TM, TN: the number of rows, columns processed by each thread, respectively.
     size_t const TM{8}, TN{8};
 
-    // The total number of threads per block corresponds to the number of cells in shared memory:
-    // BM * BK = BN * BK = BM * BN / (TM * TN).
-    // So BK = BM * BN / (TM * TN * BM) given that BM = BN.
-    size_t const BK{BN / (TM * TN)};
+    // Recall that BK determines the length of the tile and the shared memory size.
+    // BK should be (BLOCK_DIM * LOAD_ITER_M) % BM == 0 and (BLOCK_DIM * LOAD_ITER_N) % BN == 0 where
+    // LOAD_ITER_M, LOAD_ITER_N > 0 and denote the number of iterations each thread load and store into shared memory.
+    size_t const BK{16};
+    static_assert(((BK * BM) % BLOCK_DIM == 0) && ((BK * BN) % BLOCK_DIM == 0));
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BM * BN / (TM * TN));
@@ -77,6 +78,40 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
 }
 
 
+void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    size_t const BLOCK_DIM{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    size_t const BM{BLOCK_DIM}, BN{BLOCK_DIM};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    size_t const TM{8}, TN{16};
+    size_t const BK{16};
+
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    size_t const WM{64}, WN{64};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == BLOCK_DIM / 32);
+
+    // size_t const WN_ITER{4};
+    // static_assert((WM * WN) % (TM * TN * 32 * WN_ITER) == 0);
+    // size_t const WM_ITER{WM * WN / (TM * TN * 32 * WN_ITER)};
+    // static_assert((WM % WM_ITER == 0) && (WN % WN_ITER == 0));
+
+    // For vectorization purposes.
+    static_assert((BLOCK_DIM * 4) % BK == 0);
+    static_assert((BM * BK) % (4 * BLOCK_DIM) == 0);
+    static_assert((BN * BK) % (4 * BLOCK_DIM) == 0);
+
+    dim3 block_dim(BLOCK_DIM);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    warptiling<BM, BN, BK, WM, WN, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
 void run_kernel(
     int kernel_num, int M, int N, int K, float alpha, float *A, float *B,
     float beta, float *C, cublasHandle_t handle
@@ -97,6 +132,9 @@ void run_kernel(
         case 4:
             assert((N % 4 == 0) && (K % 4 == 0));
             run_vectorize(M, N, K, alpha, A, B, beta, C);
+            break;
+        case 5:
+            run_warptiling(M, N, K, alpha, A, B, beta, C);
             break;
         default:
             throw std::invalid_argument("Invalid kernel number.");
