@@ -45,9 +45,8 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
     size_t const TM{8}, TN{8};
 
     // Recall that BK determines the length of the tile and the shared memory size.
-    // BK should be (BLOCK_DIM * LOAD_ITER_M) % BM == 0 and (BLOCK_DIM * LOAD_ITER_N) % BN == 0 where
-    // LOAD_ITER_M, LOAD_ITER_N > 0 and denote the number of iterations each thread load and store into shared memory.
     size_t const BK{16};
+    // For the sake of simplicity, we make sure that BK * BM is divisible by BLOCK_DIM.
     static_assert(((BK * BM) % BLOCK_DIM == 0) && ((BK * BN) % BLOCK_DIM == 0));
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
@@ -64,9 +63,9 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
     // TM, TN: the number of rows, columns processed by each thread, respectively.
     size_t const TM{8}, TN{8};
 
-    // With vectorization (using float4), we now do TM * TN = 4 * number of threads.
-    // So BK is now BM * 4 / (TM * TN).
-    size_t const BK{BN * 4 / (TM * TN)};
+    size_t const BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * BLOCK_DIM) == 0) && ((BK * BN) % (4 * BLOCK_DIM) == 0));
 
     static_assert(BK % 4 == 0);
     static_assert((TM % 4 == 0) && (TN % 4 == 0));
