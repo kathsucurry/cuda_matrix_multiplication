@@ -32,7 +32,7 @@ __global__ void thread_coarsening_2d(int M, int N, int K, float alpha, float *A,
 
         for (size_t iter_m{0}; iter_m < LOAD_ITER_M; ++iter_m) {
             As[threadIdx.x + (iter_m * blockDim.x)] = A[
-                (block_row_offset + (A_block_row_idx + (BM / LOAD_ITER_M) * iter_m)) * K +
+                (block_row_offset + (A_block_row_idx + (BM / LOAD_ITER_M * iter_m))) * K +
                 A_block_col_idx + k_offset];
         }
         for (size_t iter_n{0}; iter_n < LOAD_ITER_N; ++iter_n) {

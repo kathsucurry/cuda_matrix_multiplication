@@ -51,12 +51,6 @@ __global__ void vectorize(int M, int N, int K, float alpha, float *A, float *B, 
             Bs[(B_trans_block_col_idx + 2) * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = tmp.z;
             Bs[(B_trans_block_col_idx + 3) * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = tmp.w;
         }
-
-
-        // We can also use As[threadIdx.x * 4].
-        reinterpret_cast<float4 *>(&As[A_block_row_idx * BK + A_block_col_idx])[0] =
-            reinterpret_cast<float4 *>(&A[(block_row_offset + A_block_row_idx) * K + A_block_col_idx + k_offset])[0];
-        
         
         __syncthreads();
 
