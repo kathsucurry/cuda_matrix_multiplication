@@ -9,3 +9,4 @@
 #include "kernels/03_2d_thread_coarsening.cuh"
 #include "kernels/04_vectorize.cuh"
 #include "kernels/05_warptiling.cuh"
+#include "kernels/06_warptiling_subdivided.cuh"

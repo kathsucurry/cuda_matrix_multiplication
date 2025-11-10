@@ -87,7 +87,7 @@ void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float 
     size_t const BM{128}, BN{128};
     // TM, TN: the number of rows, columns processed by each thread, respectively.
     size_t const TM{8}, TN{16};
-    size_t const BK{16};
+    size_t const BK{32};
     // Updated requirement given that we use float4 for vectorizing.
     static_assert(((BK * BM) % (4 * BLOCK_DIM) == 0) && ((BK * BN) % (4 * BLOCK_DIM) == 0));
     
@@ -101,6 +101,37 @@ void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float 
     dim3 block_dim(BLOCK_DIM);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
     warptiling<BM, BN, BK, WM, WN, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+void run_warptiling_subdivided(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    size_t const BLOCK_DIM{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    size_t const BM{128}, BN{128};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    size_t const TM{4}, TN{4};
+    size_t const BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * BLOCK_DIM) == 0) && ((BK * BN) % (4 * BLOCK_DIM) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    size_t const WM{64}, WN{64};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == BLOCK_DIM / 32);
+
+    size_t const WNITER{1};
+    static_assert((WM * WN) % (32 * TM * TN * WNITER) == 0);
+    size_t const WMITER{WM * WN / (32 * TM * TN * WNITER)};
+    static_assert((WM % WMITER == 0) & (WN % WNITER == 0));
+
+    dim3 block_dim(BLOCK_DIM);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    warptiling_subdivided<BM, BN, BK, WM, WN, WNITER, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
@@ -128,6 +159,9 @@ void run_kernel(
             break;
         case 5:
             run_warptiling(M, N, K, alpha, A, B, beta, C);
+            break;
+        case 6:
+            run_warptiling_subdivided(M, N, K, alpha, A, B, beta, C);
             break;
         default:
             throw std::invalid_argument("Invalid kernel number.");

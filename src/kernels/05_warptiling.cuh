@@ -66,7 +66,7 @@ __device__ void compute_gemm(
 
 
 /**
- * Corresponds to kernel 10: warptiling.
+ * Corresponds to kernel 10: warptiling (no subdivision/usage of WMITER/WNITER).
  */
 template <size_t BM, size_t BN, size_t BK, size_t WM, size_t WN, size_t TM, size_t TN>
 __global__ void warptiling(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
