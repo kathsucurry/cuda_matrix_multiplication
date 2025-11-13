@@ -1,6 +1,6 @@
 # Matrix multiplication optimization with CUDA
 
-Given 3 matrices A (m x k | **row-major**), B (k x n | **column-major**), C (m x n | **row-major**), two constants α and β, perform the following operation:
+Given 3 matrices A (m x k | **row-major**), B (k x n | **row-major**), C (m x n | **row-major**), two constants α and β, perform the following operation:
 
 ```
 C = α * AB + β * C

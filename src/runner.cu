@@ -9,22 +9,24 @@ void run_cublas(
     float *A, float *B, float beta, float *C
 ) {
     // Recall that:
-    // 1) Both A and C are row-major while B is column-major.
+    // 1) All matrices are stored in row-major order.
     // 2) cuBLAS uses column-major order (let's say C* = A* x B*).
     // So we want (C*)^T = C = (A* x B*)^T
-    // --> (B*)^T x (A*)^T --> B^T x A.
-    cublasGemmEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_32F,
+    // --> (B*)^T x (A*)^T --> B x A.
+    cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_32F,
                  K, A, CUDA_R_32F, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F,
                  CUBLAS_GEMM_DEFAULT);
 }
 
 
 void run_naive(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
-    size_t const BLOCK_DIM{32};
-    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
-    dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
+    constexpr size_t BLOCK_DIM{32};
+    constexpr size_t BM{BLOCK_DIM};
+    constexpr size_t BN{BLOCK_DIM};
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    dim3 block_dim(BN, BM, 1);
 
-    naive_gemm<<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+    naive_gemm<BM, BN><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
 
