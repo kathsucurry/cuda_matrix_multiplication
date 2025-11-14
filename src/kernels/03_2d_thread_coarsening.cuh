@@ -24,21 +24,20 @@ __global__ void thread_coarsening_2d(int M, int N, int K, float alpha, float *A,
 
     // For storing into shared memory.
     size_t const A_block_row_idx{threadIdx.x / BK};
-    size_t const B_trans_block_row_idx{threadIdx.x / BK};
+    size_t const A_block_col_idx{threadIdx.x % BK};
+    size_t const B_block_row_idx{threadIdx.x / BN};
+    size_t const B_block_col_idx{threadIdx.x % BN};
 
     for (size_t k_offset{0}; k_offset < K; k_offset += BK) {
-        size_t const A_block_col_idx{threadIdx.x % BK};
-        size_t const B_trans_block_col_idx{threadIdx.x % BK};
-
         for (size_t iter_m{0}; iter_m < LOAD_ITER_M; ++iter_m) {
             As[threadIdx.x + (iter_m * blockDim.x)] = A[
                 (block_row_offset + (A_block_row_idx + (BM / LOAD_ITER_M * iter_m))) * K +
                 A_block_col_idx + k_offset];
         }
         for (size_t iter_n{0}; iter_n < LOAD_ITER_N; ++iter_n) {
-            Bs[B_trans_block_col_idx * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = B[
-                (block_col_offset + (B_trans_block_row_idx + (BN / LOAD_ITER_N) * iter_n)) * K +
-                B_trans_block_col_idx + k_offset];
+            Bs[threadIdx.x + (iter_n * blockDim.x)] = B[
+                (B_block_row_idx + k_offset + (BK / LOAD_ITER_N) * iter_n) * N +
+                block_col_offset + B_block_col_idx];
         }
         __syncthreads();
 

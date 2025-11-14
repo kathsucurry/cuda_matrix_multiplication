@@ -21,21 +21,23 @@ void run_cublas(
 
 void run_naive(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
     constexpr size_t BLOCK_DIM{32};
-    constexpr size_t BM{BLOCK_DIM};
-    constexpr size_t BN{BLOCK_DIM};
-    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
-    dim3 block_dim(BN, BM, 1);
+    assert((N % BLOCK_DIM == 0) && (M % BLOCK_DIM == 0));
 
-    naive_gemm<BM, BN><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
+    dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
+
+    naive_gemm<BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
 
 void run_sharedmem_block_tiling(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
-    size_t const BLOCK_DIM{32};
+    constexpr size_t BLOCK_DIM{32};
+    assert((N % BLOCK_DIM == 0) && (M % BLOCK_DIM == 0) && (K % BLOCK_DIM == 0));
+
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
 
-    shared_memory_block_gemm<BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+    block_tiling_gemm<BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
 
