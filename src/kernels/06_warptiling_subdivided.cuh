@@ -5,35 +5,27 @@ namespace wt_sd {
     
 template <size_t const BM, size_t const BN, size_t const BK>
 __device__ void load_from_gmem(
-    float *A, float *B, int K,
+    float *A, float *B, int K, int N,
     float *As, float *Bs, size_t k_offset,
     size_t block_row_offset, size_t block_col_offset,
     size_t A_block_row_idx, size_t A_block_col_idx,
-    size_t B_trans_block_row_idx, size_t B_trans_block_col_idx,
+    size_t B_block_row_idx, size_t B_block_col_idx,
     size_t LOAD_ITER_M, size_t LOAD_ITER_N
 ) {
     for (size_t iter_m{0}; iter_m < LOAD_ITER_M; ++iter_m) {
-        // Can also use As[4 * (threadIdx.x + iter_m * blockDim.x)].
-        reinterpret_cast<float4 *>(&As[(A_block_row_idx + (BM / LOAD_ITER_M * iter_m)) * BK + A_block_col_idx])[0] =
+        reinterpret_cast<float4 *>(&As[4 * (threadIdx.x + iter_m * blockDim.x)])[0] =
             reinterpret_cast<float4 *>(&A[
                 (block_row_offset + A_block_row_idx + (BM / LOAD_ITER_M * iter_m)) * K +
                 A_block_col_idx + k_offset
             ])[0];
     }
-    
+        
     for (size_t iter_n{0}; iter_n < LOAD_ITER_N; ++iter_n) {
-        float4 tmp{
-             reinterpret_cast<float4 *>(
-                &B[
-                    (block_col_offset + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)) * K +
-                    B_trans_block_col_idx + k_offset
-                ])[0]
-        };
-        // Transpose.
-        Bs[(B_trans_block_col_idx + 0) * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = tmp.x;
-        Bs[(B_trans_block_col_idx + 1) * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = tmp.y;
-        Bs[(B_trans_block_col_idx + 2) * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = tmp.z;
-        Bs[(B_trans_block_col_idx + 3) * BN + B_trans_block_row_idx + (BN / LOAD_ITER_N * iter_n)] = tmp.w;
+        reinterpret_cast<float4 *>(&Bs[4 * (threadIdx.x + iter_n * blockDim.x)])[0] =
+            reinterpret_cast<float4 *>(&B[
+                (B_block_row_idx + k_offset + (BK / LOAD_ITER_N) * iter_n) * N +
+                block_col_offset + B_block_col_idx
+            ])[0];
     }
 }
 
@@ -112,19 +104,18 @@ __global__ void warptiling_subdivided(int M, int N, int K, float alpha, float *A
     size_t const LOAD_ITER_N{(BK * BN) / (4 * blockDim.x)};
 
     // For storing into shared memory.
-    size_t const A_block_row_idx = threadIdx.x / (BK / 4);
-    // The transposed row index.
-    size_t const B_trans_block_row_idx = threadIdx.x / (BK / 4);
+    size_t const A_block_row_idx{threadIdx.x / (BK / 4)};
+    size_t const A_block_col_idx{(threadIdx.x % (BK / 4)) * 4};
+    size_t const B_block_row_idx{threadIdx.x / (BN / 4)};
+    size_t const B_block_col_idx{(threadIdx.x % (BN / 4)) * 4};
 
     for (size_t k_offset{0}; k_offset < K; k_offset += BK) {
-        size_t const A_block_col_idx{(threadIdx.x % (BK / 4)) * 4};
-        size_t const B_trans_block_col_idx{(threadIdx.x % (BK / 4)) * 4};
         wt_sd::load_from_gmem<BM, BN, BK>(
-            A, B, K,
+            A, B, K, N,
             As, Bs, k_offset,
             block_row_offset, block_col_offset,
             A_block_row_idx, A_block_col_idx,
-            B_trans_block_row_idx, B_trans_block_col_idx,
+            B_block_row_idx, B_block_col_idx,
             LOAD_ITER_M, LOAD_ITER_N
         );
         __syncthreads();

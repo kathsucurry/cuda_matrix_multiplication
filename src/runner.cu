@@ -106,7 +106,7 @@ void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float 
 
     dim3 block_dim(BLOCK_DIM);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
-    warptiling<BM, BN, BK, WM, WN, TM, TN>
+    warptiling_gemm<BM, BN, BK, WM, WN, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
