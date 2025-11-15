@@ -18,9 +18,8 @@ add_compile_options(
     $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:--source-in-ptx>
     $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CXX>>:-g>
     $<$<CONFIG:Release>:--generate-line-info>
-
+    $<$<CONFIG:Release>:--ptxas-options=-v>
 )
-# add_compile_options("--ptxas-options=-v")
 
 # Configure header file search paths.
 include_directories(${CUDA_INCLUDE_DIRS})

@@ -52,10 +52,12 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
     size_t const BK{16};
     // For the sake of simplicity, we make sure that BK * BM is divisible by BLOCK_DIM.
     static_assert(((BK * BM) % BLOCK_DIM == 0) && ((BK * BN) % BLOCK_DIM == 0));
+    // The assertion below supports LOAD_ITER_M/N calculation/usage.
+    assert((BLOCK_DIM % BK == 0) && (BLOCK_DIM % BN == 0));
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BM * BN / (TM * TN));
-    thread_coarsening_2d<BM, BN, BK, TM, TN>
+    thread_coarsening_2d_gemm<BM, BN, BK, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
@@ -76,7 +78,7 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BM * BN / (TM * TN));
-    vectorize<BM, BN, BK, TM, TN>
+    vectorize_gemm<BM, BN, BK, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
