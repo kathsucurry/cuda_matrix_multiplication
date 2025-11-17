@@ -33,7 +33,6 @@ template <size_t const BN, size_t const BK, size_t const WM, size_t const WN, si
 __device__ void compute_gemm(
     float *As, float *Bs,
     float *reg_M, float *reg_N, float *out_values,
-    size_t lane_idx,
     size_t warp_row_offset, size_t warp_col_offset,
     size_t thread_row_offset, size_t thread_col_offset
 ) {
@@ -101,7 +100,7 @@ __global__ void warptiling_gemm(int M, int N, int K, float alpha, float *A, floa
 
         // Execute the dot product.
         wt::compute_gemm<BN, BK, WM, WN, TM, TN>(
-            As, Bs, reg_M, reg_N, out_values, lane_idx, warp_row_offset, warp_col_offset,
+            As, Bs, reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
             thread_row_offset, thread_col_offset
         );
         __syncthreads();

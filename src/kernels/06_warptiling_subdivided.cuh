@@ -37,7 +37,6 @@ template <size_t const BM, size_t const BN, size_t const BK,
 __device__ void compute_gemm(
     float *As, float *Bs,
     float *reg_M, float *reg_N, float *out_values,
-    size_t lane_idx,
     size_t warp_row_offset, size_t warp_col_offset,
     size_t thread_row_in_warp, size_t thread_col_in_warp
 ) {
@@ -77,7 +76,7 @@ __device__ void compute_gemm(
  * Corresponds to kernel 10: warptiling.
  */
 template <size_t BM, size_t BN, size_t BK, size_t WM, size_t WN, size_t WNITER, size_t TM, size_t TN>
-__global__ void warptiling_subdivided(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+__global__ void warptiling_subdivided_gemm(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
 
@@ -122,7 +121,7 @@ __global__ void warptiling_subdivided(int M, int N, int K, float alpha, float *A
 
         // Execute the dot product.
         wt_sd::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
-            As, Bs, reg_M, reg_N, out_values, lane_idx, warp_row_offset, warp_col_offset,
+            As, Bs, reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
             thread_row_in_warp, thread_col_in_warp
         );
         __syncthreads();
