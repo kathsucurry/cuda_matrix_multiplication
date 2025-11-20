@@ -2,7 +2,10 @@
 
 
 template <size_t const BLOCK_DIM>
-__global__ void naive_gemm(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+__global__ void __launch_bounds__(BLOCK_DIM * BLOCK_DIM) naive_gemm(
+    int M, int N, int K, float alpha,
+    float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
+) {
     size_t const global_x_idx{blockIdx.x * BLOCK_DIM + threadIdx.x};
     size_t const global_y_idx{blockIdx.y * BLOCK_DIM + threadIdx.y};
 

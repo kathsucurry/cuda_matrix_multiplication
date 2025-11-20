@@ -49,7 +49,7 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
     size_t const TM{8}, TN{8};
 
     // Recall that BK determines the length of the tile and the shared memory size.
-    size_t const BK{16};
+    size_t const BK{32};
     // For the sake of simplicity, we make sure that BK * BM is divisible by BLOCK_DIM.
     static_assert(((BK * BM) % BLOCK_DIM == 0) && ((BK * BN) % BLOCK_DIM == 0));
     // The assertion below supports LOAD_ITER_M/N calculation/usage.
@@ -57,7 +57,7 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BM * BN / (TM * TN));
-    thread_coarsening_2d_gemm<BM, BN, BK, TM, TN>
+    thread_coarsening_2d_gemm<BM * BN / (TM * TN), BM, BN, BK, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
@@ -67,7 +67,7 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
     // BM: the size of block vertically; BN: the size of block horizontally. 
     size_t const BM{BLOCK_DIM}, BN{BLOCK_DIM};
     // TM, TN: the number of rows, columns processed by each thread, respectively.
-    size_t const TM{8}, TN{8};
+    size_t const TM{16}, TN{8};
 
     size_t const BK{32};
     // Updated requirement given that we use float4 for vectorizing.
@@ -78,7 +78,7 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BM * BN / (TM * TN));
-    vectorize_gemm<BM, BN, BK, TM, TN>
+    vectorize_gemm<BM * BN / (TM * TN), BM, BN, BK, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
@@ -88,17 +88,17 @@ void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float 
     // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
     // 2) Compute the dot product between elements --> where warptiling is implemented.
     
-    size_t const NUM_THREADS{256};
+    size_t const NUM_THREADS{128};
     // BM: the size of block vertically; BN: the size of block horizontally. 
     size_t const BM{128}, BN{128};
     // TM, TN: the number of rows, columns processed by each thread, respectively.
-    size_t const TM{8}, TN{8};
+    size_t const TM{16}, TN{8};
     size_t const BK{32};
     // Updated requirement given that we use float4 for vectorizing.
     static_assert(((BK * BM) % (4 * NUM_THREADS) == 0) && ((BK * BN) % (4 * NUM_THREADS) == 0));
     
     // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
-    size_t const WM{16}, WN{128};
+    size_t const WM{32}, WN{128};
     static_assert((BN % WN == 0) && (BM % WM == 0));
     static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
 
@@ -106,12 +106,43 @@ void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float 
 
     dim3 block_dim(NUM_THREADS);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
-    warptiling_gemm<BM, BN, BK, WM, WN, TM, TN>
+    warptiling_gemm<NUM_THREADS, BM, BN, BK, WM, WN, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
 
 void run_warptiling_subdivided(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    size_t const NUM_THREADS{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    size_t const BM{128}, BN{128};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    size_t const TM{8}, TN{4};
+    size_t const BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * NUM_THREADS) == 0) && ((BK * BN) % (4 * NUM_THREADS) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    size_t const WM{32}, WN{128};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
+
+    size_t const WNITER{2};
+    static_assert((WM * WN) % (32 * TM * TN * WNITER) == 0);
+    size_t const WMITER{WM * WN / (32 * TM * TN * WNITER)};
+    static_assert((WM % WMITER == 0) & (WN % WNITER == 0));
+
+    dim3 block_dim(NUM_THREADS);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    warptiling_subdivided_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WNITER, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+void run_transpose_shared_a(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
     // The overall method can be separated into two steps:
     // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
     // 2) Compute the dot product between elements --> where warptiling is implemented.
@@ -137,7 +168,38 @@ void run_warptiling_subdivided(int M, int N, int K, float alpha, float *A, float
 
     dim3 block_dim(NUM_THREADS);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
-    warptiling_subdivided_gemm<BM, BN, BK, WM, WN, WNITER, TM, TN>
+    warptiling_transposed_a_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WNITER, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+void run_swizzled_smem(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    constexpr size_t NUM_THREADS{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    constexpr size_t BM{128}, BN{128};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    constexpr size_t TM{8}, TN{4};
+    constexpr size_t BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * NUM_THREADS) == 0) && ((BK * BN) % (4 * NUM_THREADS) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    constexpr size_t WM{32}, WN{128};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
+
+    constexpr size_t WNITER{2};
+    static_assert((WM * WN) % (32 * TM * TN * WNITER) == 0);
+    constexpr size_t WMITER{WM * WN / (32 * TM * TN * WNITER)};
+    static_assert((WM % WMITER == 0) & (WN % WNITER == 0));
+
+    dim3 block_dim(NUM_THREADS);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    warptiling_swizzled_smem_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WNITER, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
@@ -168,6 +230,12 @@ void run_kernel(
             break;
         case 6:
             run_warptiling_subdivided(M, N, K, alpha, A, B, beta, C);
+            break;
+        case 7:
+            run_transpose_shared_a(M, N, K, alpha, A, B, beta, C);
+            break;
+        case 8:
+            run_swizzled_smem(M, N, K, alpha, A, B, beta, C);
             break;
         default:
             throw std::invalid_argument("Invalid kernel number.");

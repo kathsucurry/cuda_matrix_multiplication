@@ -10,3 +10,5 @@
 #include "kernels/04_vectorize.cuh"
 #include "kernels/05_warptiling.cuh"
 #include "kernels/06_warptiling_subdivided.cuh"
+#include "kernels/07_transpose_shared_a.cuh"
+#include "kernels/08_resolved_bank_conflict.cuh"

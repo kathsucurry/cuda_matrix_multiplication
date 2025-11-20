@@ -50,8 +50,9 @@ void free_matrices(
 
 
 int main(int argc, char **argv) {
-    int kernel_num = get_kernel_input(argc, argv);
-
+    // int kernel_num = get_kernel_input(argc, argv);
+    int kernel_num = 8;
+    
     // Set CUDA context.
     CHECK_CUDA_ERROR(cudaSetDevice(0));
     

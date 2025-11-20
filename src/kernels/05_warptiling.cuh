@@ -5,34 +5,27 @@ namespace wt {
     
 template <size_t const BM, size_t const BN, size_t const BK>
 __device__ void load_from_gmem(
-    float *A, float *B, int K, int N,
-    float *As, float *Bs, size_t k_offset,
-    size_t block_row_offset, size_t block_col_offset,
+    float *__restrict__ A, float *__restrict__ B, int N, int K,
+    float *__restrict__ As, float *__restrict__ Bs,
     size_t A_block_row_idx, size_t A_block_col_idx,
     size_t B_block_row_idx, size_t B_block_col_idx,
-    size_t LOAD_ITER_M, size_t LOAD_ITER_N
+    size_t stride_A, size_t stride_B
 ) {
-    for (size_t iter_m{0}; iter_m < LOAD_ITER_M; ++iter_m) {
-        reinterpret_cast<float4 *>(&As[4 * (threadIdx.x + iter_m * blockDim.x)])[0] =
-            reinterpret_cast<float4 *>(&A[
-                (block_row_offset + A_block_row_idx + (BM / LOAD_ITER_M * iter_m)) * K +
-                A_block_col_idx + k_offset
-            ])[0];
+    for (size_t A_load_offset{0}; A_load_offset < BM; A_load_offset += stride_A) {
+        reinterpret_cast<float4 *>(&As[(A_block_row_idx + A_load_offset) * BK + A_block_col_idx])[0] =
+            reinterpret_cast<float4 *>(&A[(A_block_row_idx + A_load_offset) * K + A_block_col_idx])[0];
     }
         
-    for (size_t iter_n{0}; iter_n < LOAD_ITER_N; ++iter_n) {
-        reinterpret_cast<float4 *>(&Bs[4 * (threadIdx.x + iter_n * blockDim.x)])[0] =
-            reinterpret_cast<float4 *>(&B[
-                (B_block_row_idx + k_offset + (BK / LOAD_ITER_N) * iter_n) * N +
-                block_col_offset + B_block_col_idx
-            ])[0];
+    for (size_t B_load_offset{0}; B_load_offset < BK; B_load_offset += stride_B) {
+        reinterpret_cast<float4 *>(&Bs[(B_block_row_idx + B_load_offset) * BN + B_block_col_idx])[0] =
+            reinterpret_cast<float4 *>(&B[(B_block_row_idx + B_load_offset) * N + B_block_col_idx])[0];
     }
 }
 
 template <size_t const BN, size_t const BK, size_t const WM, size_t const WN, size_t const TM, size_t const TN>
 __device__ void compute_gemm(
-    float *As, float *Bs,
-    float *reg_M, float *reg_N, float *out_values,
+    float *__restrict__ As, float *__restrict__ Bs,
+    float *__restrict__ reg_M, float *__restrict__ reg_N, float *out_values,
     size_t warp_row_offset, size_t warp_col_offset,
     size_t thread_row_offset, size_t thread_col_offset
 ) {
@@ -43,9 +36,7 @@ __device__ void compute_gemm(
         for (size_t tile_x_idx{0}; tile_x_idx < TN; ++tile_x_idx)
             reg_N[tile_x_idx] = Bs[k * BN + (warp_col_offset + thread_col_offset + tile_x_idx)];
 
-#pragma unroll
         for (size_t tile_y_idx{0}; tile_y_idx < TM; ++tile_y_idx) {
-#pragma unroll
             for (size_t tile_x_idx{0}; tile_x_idx < TN; ++tile_x_idx) {
                 out_values[tile_y_idx * TN + tile_x_idx] += reg_M[tile_y_idx] * reg_N[tile_x_idx];
             }
@@ -59,8 +50,11 @@ __device__ void compute_gemm(
 /**
  * Corresponds to kernel 10: warptiling (no subdivision/usage of WMITER/WNITER).
  */
-template <size_t BM, size_t BN, size_t BK, size_t WM, size_t WN, size_t TM, size_t TN>
-__global__ void warptiling_gemm(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+template <size_t NUM_THREADS, size_t BM, size_t BN, size_t BK, size_t WM, size_t WN, size_t TM, size_t TN>
+__global__ void __launch_bounds__(NUM_THREADS) warptiling_gemm(
+    int M, int N, int K, float alpha,
+    float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
+) {
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
 
@@ -75,28 +69,36 @@ __global__ void warptiling_gemm(int M, int N, int K, float alpha, float *A, floa
     float reg_M[TM] = {0.0f};
     float reg_N[TN] = {0.0f};
 
-    size_t const block_row_offset{blockIdx.y * BM};
-    size_t const block_col_offset{blockIdx.x * BN};
+    {
+        size_t const block_row_offset{blockIdx.y * BM};
+        size_t const block_col_offset{blockIdx.x * BN};
 
-    size_t const LOAD_ITER_M{(BK * BM) / (4 * blockDim.x)};
-    size_t const LOAD_ITER_N{(BK * BN) / (4 * blockDim.x)};
+        A += block_row_offset * K;
+        B += block_col_offset;
+        C += block_row_offset * N + block_col_offset;
+    }
+
+    constexpr size_t stride_A{(NUM_THREADS << 2) / BK};
+    constexpr size_t stride_B{(NUM_THREADS << 2) / BN};
 
     // For storing into shared memory.
-    size_t const A_block_row_idx{threadIdx.x / (BK / 4)};
-    size_t const A_block_col_idx{(threadIdx.x % (BK / 4)) * 4};
-    size_t const B_block_row_idx{threadIdx.x / (BN / 4)};
-    size_t const B_block_col_idx{(threadIdx.x % (BN / 4)) * 4};
+    size_t const A_block_row_idx{threadIdx.x / (BK >> 2)};
+    size_t const A_block_col_idx{(threadIdx.x % (BK >> 2)) << 2};
+    size_t const B_block_row_idx{threadIdx.x / (BN >> 2)};
+    size_t const B_block_col_idx{(threadIdx.x % (BN >> 2)) << 2};
 
     for (size_t k_offset{0}; k_offset < K; k_offset += BK) {
         wt::load_from_gmem<BM, BN, BK>(
-            A, B, K, N,
-            As, Bs, k_offset,
-            block_row_offset, block_col_offset,
+            A, B, N, K,
+            As, Bs,
             A_block_row_idx, A_block_col_idx,
             B_block_row_idx, B_block_col_idx,
-            LOAD_ITER_M, LOAD_ITER_N
+            stride_A, stride_B
         );
         __syncthreads();
+
+        A += BK;
+        B += BK * N;
 
         // Execute the dot product.
         wt::compute_gemm<BN, BK, WM, WN, TM, TN>(
@@ -108,8 +110,8 @@ __global__ void warptiling_gemm(int M, int N, int K, float alpha, float *A, floa
 
     for (size_t tile_y_idx{0}; tile_y_idx < TM; ++tile_y_idx) {
         for (size_t tile_x_idx{0}; tile_x_idx < TN; tile_x_idx += 4) {
-            size_t const cell_row_idx{block_row_offset + warp_row_offset + thread_row_offset + tile_y_idx};
-            size_t const cell_col_idx{block_col_offset + warp_col_offset + thread_col_offset + tile_x_idx};
+            size_t const cell_row_idx{warp_row_offset + thread_row_offset + tile_y_idx};
+            size_t const cell_col_idx{warp_col_offset + thread_col_offset + tile_x_idx};
 
             float4 tmp = reinterpret_cast<float4 *>(
                 &C[cell_row_idx * N + cell_col_idx]

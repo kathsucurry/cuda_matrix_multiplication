@@ -1,10 +1,32 @@
 #pragma once
 
-#include "05_warptiling.cuh"
 
+namespace wt_transposed {
 
-namespace wt_sd {
-    
+template <size_t const BM, size_t const BN, size_t const BK>
+__device__ void load_from_gmem(
+    float *__restrict__ A, float *__restrict__ B, int K, int N,
+    float *__restrict__ As, float *__restrict__ Bs,
+    size_t A_block_row_idx, size_t A_block_col_idx,
+    size_t B_block_row_idx, size_t B_block_col_idx,
+    size_t stride_A, size_t stride_B
+) {
+    for (size_t A_load_offset{0}; A_load_offset < BM; A_load_offset += stride_A) {
+        // Store in transposed As.
+        float4 tmp = reinterpret_cast<float4 *>(&A[(A_block_row_idx + A_load_offset) * K + A_block_col_idx])[0];
+
+        As[(A_block_col_idx + 0) * BM + A_block_row_idx + A_load_offset] = tmp.x;
+        As[(A_block_col_idx + 1) * BM + A_block_row_idx + A_load_offset] = tmp.y;
+        As[(A_block_col_idx + 2) * BM + A_block_row_idx + A_load_offset] = tmp.z;
+        As[(A_block_col_idx + 3) * BM + A_block_row_idx + A_load_offset] = tmp.w;
+    }
+        
+    for (size_t B_load_offset{0}; B_load_offset < BK; B_load_offset += stride_B) {
+        reinterpret_cast<float4 *>(&Bs[(B_block_row_idx + B_load_offset) * BN + B_block_col_idx])[0] =
+            reinterpret_cast<float4 *>(&B[(B_block_row_idx + B_load_offset) * N + B_block_col_idx])[0];
+    }
+}
+
 template <size_t const BM, size_t const BN, size_t const BK,
             size_t const WM, size_t const WN, 
             size_t const WMITER, size_t const WNITER,
@@ -13,8 +35,7 @@ template <size_t const BM, size_t const BN, size_t const BK,
 __device__ void compute_gemm(
     float *__restrict__ As, float *__restrict__ Bs,
     float *__restrict__ reg_M, float *__restrict__ reg_N, float *__restrict__ out_values,
-    size_t warp_row_offset, size_t warp_col_offset,
-    size_t thread_row_in_warp, size_t thread_col_in_warp
+    size_t row_offset, size_t col_offset
 ) {
     // Recall that reg_M has a size of WMITER * TM and
     // reg_N has a size of WNITER * TN.
@@ -22,7 +43,7 @@ __device__ void compute_gemm(
         for (size_t wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx) {
             for (size_t tm_idx{0}; tm_idx < TM; ++tm_idx) {
                 reg_M[wmiter_idx * TM + tm_idx] = As[
-                    (warp_row_offset + wmiter_idx * WSUBM + thread_row_in_warp * TM + tm_idx) * BK + k
+                    k * BM + (row_offset + wmiter_idx * WSUBM + tm_idx)
                 ];
             }
         }
@@ -30,7 +51,7 @@ __device__ void compute_gemm(
         for (size_t wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx) {
             for (size_t tn_idx{0}; tn_idx < TN; ++tn_idx) {
                 reg_N[wniter_idx * TN + tn_idx] = Bs[
-                    k * BN + (warp_col_offset + wniter_idx * WSUBN + thread_col_in_warp * TN + tn_idx)
+                    k * BN + (col_offset + wniter_idx * WSUBN + tn_idx)
                 ];
             }
         }
@@ -52,11 +73,11 @@ __device__ void compute_gemm(
  * Corresponds to kernel 10: warptiling.
  */
 template <size_t NUM_THREADS, size_t BM, size_t BN, size_t BK, size_t WM, size_t WN, size_t WNITER, size_t TM, size_t TN>
-__global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
+__global__ void __launch_bounds__(NUM_THREADS) warptiling_transposed_a_gemm(
     int M, int N, int K, float alpha,
     float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
 ) {
-    __shared__ float As[BM * BK];
+    __shared__ float As[BK * BM];
     __shared__ float Bs[BK * BN];
 
     size_t const lane_idx{threadIdx.x % 32};
@@ -94,7 +115,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
     size_t const B_block_col_idx{(threadIdx.x % (BN >> 2)) << 2};
 
     for (size_t k_offset{0}; k_offset < K; k_offset += BK) {
-        wt::load_from_gmem<BM, BN, BK>(
+        wt_transposed::load_from_gmem<BM, BN, BK>(
             A, B, N, K,
             As, Bs,
             A_block_row_idx, A_block_col_idx,
@@ -107,9 +128,10 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
         B += BK * N;
 
         // Execute the dot product.
-        wt_sd::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
-            As, Bs, reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
-            thread_row_in_warp, thread_col_in_warp
+        wt_transposed::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+            As, Bs, reg_M, reg_N, out_values, 
+            warp_row_offset + thread_row_in_warp * TM,
+            warp_col_offset + thread_col_in_warp * TN
         );
         __syncthreads();
     }
