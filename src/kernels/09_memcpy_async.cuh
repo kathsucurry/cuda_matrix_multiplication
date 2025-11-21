@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cuda_pipeline.h>
 
-namespace wt_swizzled {
+#include "06_warptiling_subdivided.cuh"
 
+
+namespace wt_memcpy_async {
+    
 template <uint const BM, uint const BN, uint const BK>
 __device__ void load_from_gmem(
     float *__restrict__ A, float *__restrict__ B, int N, int K,
@@ -12,59 +16,22 @@ __device__ void load_from_gmem(
     uint stride_A, uint stride_B
 ) {
     for (int A_load_offset{0}; A_load_offset < BM; A_load_offset += stride_A) {
-        float4 tmp = reinterpret_cast<float4 *>(&As[(A_block_row_idx + A_load_offset) * BK + A_block_col_idx])[0];
-        A[(A_block_row_idx + A_load_offset) * K + (A_block_row_idx ^ (A_block_col_idx + 0)) % BK] = tmp.x;
-        A[(A_block_row_idx + A_load_offset) * K + (A_block_row_idx ^ (A_block_col_idx + 1)) % BK] = tmp.y;
-        A[(A_block_row_idx + A_load_offset) * K + (A_block_row_idx ^ (A_block_col_idx + 2)) % BK] = tmp.z;
-        A[(A_block_row_idx + A_load_offset) * K + (A_block_row_idx ^ (A_block_col_idx + 3)) % BK] = tmp.w;
+        __pipeline_memcpy_async(
+            &As[(A_block_row_idx + A_load_offset) * BK + A_block_col_idx],
+            &A[(A_block_row_idx + A_load_offset) * K + A_block_col_idx],
+            4 * sizeof(float)
+        );
     }
+    __pipeline_commit();
         
     for (int B_load_offset{0}; B_load_offset < BK; B_load_offset += stride_B) {
-        reinterpret_cast<float4 *>(&Bs[(B_block_row_idx + B_load_offset) * BN + B_block_col_idx])[0] =
-            reinterpret_cast<float4 *>(&B[(B_block_row_idx + B_load_offset) * N + B_block_col_idx])[0];
+        __pipeline_memcpy_async(
+            &Bs[(B_block_row_idx + B_load_offset) * BN + B_block_col_idx],
+            &B[(B_block_row_idx + B_load_offset) * N + B_block_col_idx],
+            4 * sizeof(float)
+        );
     }
-}    
-
-template <uint const BM, uint const BN, uint const BK,
-            uint const WM, uint const WN, 
-            uint const WMITER, uint const WNITER,
-            uint const WSUBM, uint const WSUBN, 
-            uint const TM, uint const TN>
-__device__ void compute_gemm(
-    float *__restrict__ As, float *__restrict__ Bs,
-    float *__restrict__ reg_M, float *__restrict__ reg_N, float *__restrict__ out_values,
-    uint warp_row_offset, uint warp_col_offset,
-    uint thread_row_in_warp, uint thread_col_in_warp
-) {
-    // Recall that reg_M has a size of WMITER * TM and
-    // reg_N has a size of WNITER * TN.
-    for (int k{0}; k < BK; ++k) {
-        for (int wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx) {
-            for (int tm_idx{0}; tm_idx < TM; ++tm_idx) {
-                uint const row_idx{warp_row_offset + wmiter_idx * WSUBM + thread_row_in_warp * TM + tm_idx};
-                reg_M[wmiter_idx * TM + tm_idx] = As[row_idx * BK + (k ^ row_idx) % BK];
-                // reg_M[wmiter_idx * TM + tm_idx] = As[
-                //     (warp_row_offset + wmiter_idx * WSUBM + thread_row_in_warp * TM + tm_idx) * BK + k
-                // ];
-            }
-        }
-
-        for (int wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx) {
-            for (int tn_idx{0}; tn_idx < TN; ++tn_idx) {
-                reg_N[wniter_idx * TN + tn_idx] = Bs[
-                    k * BN + (warp_col_offset + wniter_idx * WSUBN + thread_col_in_warp * TN + tn_idx)
-                ];
-            }
-        }
-
-        for (int wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx)
-            for (int wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx)
-                for (int tm_idx{0}; tm_idx < TM; ++tm_idx)
-                    for (int tn_idx{0}; tn_idx < TN; ++tn_idx) {
-                        out_values[(wmiter_idx * TM + tm_idx) * (WNITER * TN) + wniter_idx * TN + tn_idx] +=
-                            reg_M[wmiter_idx * TM + tm_idx] * reg_N[wniter_idx * TN + tn_idx];
-                    }
-    }
+    __pipeline_commit();
 }
 
 };
@@ -72,12 +39,12 @@ __device__ void compute_gemm(
 
 template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK,
     uint const WM, uint const WN, uint const WNITER, uint const TM, uint const TN>
-__global__ void __launch_bounds__(NUM_THREADS) warptiling_swizzled_smem_gemm(
+__global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     int M, int N, int K, float alpha,
     float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
 ) {
-    __shared__ float As[BM * BK];
-    __shared__ float Bs[BK * BN];
+    __shared__ float As[2][BM * BK];
+    __shared__ float Bs[2][BK * BN];
 
     uint const lane_idx{threadIdx.x % 32};
     uint const warp_idx{threadIdx.x / 32};
@@ -113,26 +80,49 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_swizzled_smem_gemm(
     uint const B_block_row_idx{threadIdx.x / (BN >> 2)};
     uint const B_block_col_idx{(threadIdx.x % (BN >> 2)) << 2};
 
-    for (int k_offset{0}; k_offset < K; k_offset += BK) {
-        wt::load_from_gmem<BM, BN, BK>(
+    int current{0};
+
+    wt_memcpy_async::load_from_gmem<BM, BN, BK>(
+        A, B, N, K,
+        As[current], Bs[current],
+        A_block_row_idx, A_block_col_idx,
+        B_block_row_idx, B_block_col_idx,
+        stride_A, stride_B
+    );
+    __pipeline_wait_prior(0);
+    __syncthreads();
+
+    for (int k_offset{0}; k_offset < K - BK; k_offset += BK) {
+        A += BK;
+        B += BK * N;
+
+        wt_memcpy_async::load_from_gmem<BM, BN, BK>(
             A, B, N, K,
-            As, Bs,
+            As[current ^ 1], Bs[current ^ 1],
             A_block_row_idx, A_block_col_idx,
             B_block_row_idx, B_block_col_idx,
             stride_A, stride_B
         );
+        __pipeline_wait_prior(BM / stride_A + BK / stride_B);
         __syncthreads();
-
-        A += BK;
-        B += BK * N;
 
         // Execute the dot product.
         wt_sd::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
-            As, Bs, reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
+            As[current], Bs[current], reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
             thread_row_in_warp, thread_col_in_warp
         );
         __syncthreads();
+
+        current ^= 1;
     }
+    __pipeline_wait_prior(0);
+    __syncthreads();
+
+    wt_sd::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        As[current], Bs[current], reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
+        thread_row_in_warp, thread_col_in_warp
+    );
+    __syncthreads();
 
     for (int wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx)
         for (int wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx) {

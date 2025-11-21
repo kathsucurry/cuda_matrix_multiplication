@@ -41,18 +41,16 @@ __device__ void compute_gemm(
     // reg_N has a size of WNITER * TN.
     for (int k{0}; k < BK; ++k) {
         for (int wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx) {
-            for (int tm_idx{0}; tm_idx < TM; ++tm_idx) {
-                reg_M[wmiter_idx * TM + tm_idx] = As[
-                    k * BM + (row_offset + wmiter_idx * WSUBM + tm_idx)
-                ];
+            for (int tm_idx{0}; tm_idx < TM; tm_idx += 4) {
+                reinterpret_cast<float4 *>(&reg_M[wmiter_idx * TM + tm_idx])[0] =
+                    reinterpret_cast<float4 *>(&As[k * BM + (row_offset + wmiter_idx * WSUBM + tm_idx)])[0];
             }
         }
 
         for (int wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx) {
-            for (int tn_idx{0}; tn_idx < TN; ++tn_idx) {
-                reg_N[wniter_idx * TN + tn_idx] = Bs[
-                    k * BN + (col_offset + wniter_idx * WSUBN + tn_idx)
-                ];
+            for (int tn_idx{0}; tn_idx < TN; tn_idx += 4) {
+                reinterpret_cast<float4 *>(&reg_N[wniter_idx * TN + tn_idx])[0] =
+                    reinterpret_cast<float4 *>(&Bs[k * BN + (col_offset + wniter_idx * WSUBN + tn_idx)])[0];
             }
         }
 
@@ -69,9 +67,6 @@ __device__ void compute_gemm(
 };
 
 
-/**
- * Corresponds to kernel 10: warptiling.
- */
 template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK,
     uint const WM, uint const WN, uint const WNITER, uint const TM, uint const TN>
 __global__ void __launch_bounds__(NUM_THREADS) warptiling_transposed_a_gemm(

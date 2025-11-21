@@ -12,3 +12,4 @@
 #include "kernels/06_warptiling_subdivided.cuh"
 #include "kernels/07_transpose_shared_a.cuh"
 #include "kernels/08_resolved_bank_conflict.cuh"
+#include "kernels/09_memcpy_async.cuh"
