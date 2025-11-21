@@ -1,6 +1,5 @@
 #include <assert.h>
 
-#include "kernels.cuh"
 #include "runner.cuh"
 
 
@@ -17,6 +16,21 @@ void run_cublas(
                  K, A, CUDA_R_32F, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F,
                  CUBLAS_GEMM_DEFAULT);
 }
+
+
+void run_cublas(
+    cublasHandle_t handle, int M, int N, int K, half alpha,
+    half *A, half *B, half beta, half *C
+) {
+    // TODO: implement.
+}
+
+
+template <typename T>
+void run_cublas(
+    cublasHandle_t handle, int M, int N, int K, T alpha,
+    T *A, T *B, T beta, T *C
+) = delete;
 
 
 void run_naive(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
@@ -274,6 +288,20 @@ void run_kernel(
         break;
     case 9:
         run_double_buffering(M, N, K, alpha, A, B, beta, C);
+        break;
+    default:
+        throw std::invalid_argument("Invalid kernel number.");
+    }
+}
+
+
+void run_kernel(
+    int kernel_num, int M, int N, int K, half alpha, half *A, half *B,
+    half beta, half *C, cublasHandle_t handle
+) {
+    switch (kernel_num) {
+    case 0:
+        run_cublas(handle, M, N, K, alpha, A, B, beta, C);
         break;
     default:
         throw std::invalid_argument("Invalid kernel number.");
