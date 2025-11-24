@@ -22,7 +22,9 @@ void run_cublas(
     cublasHandle_t handle, int M, int N, int K, half alpha,
     half *A, half *B, half beta, half *C
 ) {
-    // TODO: implement.
+    cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_16F,
+                 K, A, CUDA_R_16F, K, &beta, C, CUDA_R_16F, N, CUBLAS_COMPUTE_16F,
+                 CUBLAS_GEMM_DEFAULT);
 }
 
 

@@ -1,3 +1,4 @@
+#include <cuda_fp16.h>
 #include <iostream>
 #include <stdio.h>
 #include <string>
@@ -22,15 +23,15 @@ int main(int argc, char **argv) {
     
     // Generate matrices.
     // std::vector<size_t> const MATRIX_SIZE = {128, 256, 512, 1024, 2048, 4096, 8192};
-    std::vector<size_t> const MATRIX_SIZE = {4096};
+    std::vector<uint> const MATRIX_SIZE = {4096};
 
-    size_t const max_matrix_size = MATRIX_SIZE[MATRIX_SIZE.size() - 1];
+    uint const max_matrix_size = MATRIX_SIZE[MATRIX_SIZE.size() - 1];
     std::cout << "Max matrix size: " << max_matrix_size << std::endl;
 
     // Prepare host and device matrices variables.
     // Define the type (float/fp32, ...) accordingly.
-    float *A{nullptr}, *B{nullptr}, *C{nullptr}, *C_ref{nullptr};
-    float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *C_ref_d{nullptr};
+    half *A{nullptr}, *B{nullptr}, *C{nullptr}, *C_ref{nullptr};
+    half *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *C_ref_d{nullptr};
     prepare_matrices(A, B, C, C_ref, A_d, B_d, C_d, C_ref_d, max_matrix_size);
 
     measure_performance(

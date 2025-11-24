@@ -28,6 +28,6 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 aux_source_directory(${PROJECT_SOURCE_DIR}/src SRC)
 
 # generate executable
-add_executable(matmul run_kernel.cu ${SRC})
+add_executable(matmul run_kernel_fp16.cu ${SRC})
 set_target_properties(matmul PROPERTIES CUDA_ARCHITECTURES ${CUDA_COMPUTE_CAPABILITY})
 target_link_libraries(matmul ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})

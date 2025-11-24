@@ -22,7 +22,7 @@ void run_kernel(
 
 template <typename T>
 void measure_performance(
-    std::vector<size_t> const MATRIX_SIZE,
+    std::vector<uint> const MATRIX_SIZE,
     cublasHandle_t cublas_handle,
     int const kernel_num,
     T *&A,
@@ -34,9 +34,12 @@ void measure_performance(
     T *&C_d,
     T *&C_ref_d
 ) {
+    using traits = scalar_traits<T>;
+    using compute_t = typename traits::compute_t;
+
     // Define matmul parameters: C = α * AB + β * C.
-    constexpr T alpha{static_cast<T>(0.5)};
-    constexpr T beta{static_cast<T>(3.0)};
+    T alpha{static_cast<T>(0.5)};
+    T beta{static_cast<T>(3.0)};
 
     constexpr int repeat_times{50};
     float elapsed_time_ms;
@@ -50,11 +53,11 @@ void measure_performance(
     for (size_t size : MATRIX_SIZE) {
         size_t const M{size};
         size_t const N{size};
-        size_t const K{size};
+        size_t const K{size}; 
 
         std::cout << "dimensions(m=n=k) " << M
-                  << ", alpha: " << alpha
-                  << ", beta: "  << beta << std::endl;
+                  << ", alpha: " << compute_t(alpha)
+                  << ", beta: "  << compute_t(beta) << std::endl;
         
         // Verify the correctness by comparing against cuBLAS if kernel number != 0.
         if (kernel_num != 0) {
