@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cassert>
 #include <cublas_v2.h>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -15,9 +17,21 @@ void run_kernel(
 
 
 void run_kernel(
-    int kernel_num, int M, int N, int K, half alpha, half *A, half *B,
-    half beta, half *C, cublasHandle_t handle
+    int kernel_num, int M, int N, int K, __nv_bfloat16 alpha, __nv_bfloat16 *A, __nv_bfloat16 *B,
+    __nv_bfloat16 beta, __nv_bfloat16 *C, cublasHandle_t handle
 );
+
+
+template <typename T>
+void run_naive(int M, int N, int K, float alpha, T *A, T *B, float beta, T *C) {
+    constexpr uint BLOCK_DIM{32};
+    assert((N % BLOCK_DIM == 0) && (M % BLOCK_DIM == 0));
+
+    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
+    dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
+
+    naive_gemm<T, BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
 
 
 template <typename T>
@@ -34,12 +48,9 @@ void measure_performance(
     T *&C_d,
     T *&C_ref_d
 ) {
-    using traits = scalar_traits<T>;
-    using compute_t = typename traits::compute_t;
-
     // Define matmul parameters: C = α * AB + β * C.
-    T alpha{static_cast<T>(0.5)};
-    T beta{static_cast<T>(3.0)};
+    constexpr float alpha{0.5f};
+    constexpr float beta{3.0f};
 
     constexpr int repeat_times{50};
     float elapsed_time_ms;
@@ -56,8 +67,8 @@ void measure_performance(
         size_t const K{size}; 
 
         std::cout << "dimensions(m=n=k) " << M
-                  << ", alpha: " << compute_t(alpha)
-                  << ", beta: "  << compute_t(beta) << std::endl;
+                  << ", alpha: " << alpha
+                  << ", beta: "  << beta << std::endl;
         
         // Verify the correctness by comparing against cuBLAS if kernel number != 0.
         if (kernel_num != 0) {

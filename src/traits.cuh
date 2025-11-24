@@ -1,32 +1,29 @@
-#include <cuda_fp16.h> 
+#pragma once
+
+#include <cuda_bf16.h> 
 
 
 template <typename T>
-struct scalar_traits; 
+struct float_traits; 
 
 
 template <>
-struct scalar_traits<double> {
-    using compute_t = double;
-    
-    static __host__ __device__ compute_t to_compute(double x) { return x; }
-    static __host__ __device__ compute_t from_compute(compute_t x) { return x; }
-};
-
-
-template <>
-struct scalar_traits<float> {
+struct float_traits<float> {
     using compute_t = float;
     
     static __host__ __device__ compute_t to_compute(float x) { return x; }
-    static __host__ __device__ compute_t from_compute(compute_t x) { return x; }
+    static __host__ __device__ float from_compute(compute_t x) { return x; }
 };
 
 
 template <>
-struct scalar_traits<__half> {
+struct float_traits<__nv_bfloat16> {
     using compute_t = float;
     
-    static __host__ __device__ compute_t to_compute(__half x) { return __half2float(x); }
-    static __host__ __device__ compute_t from_compute(compute_t x) { return __float2half(x); }
+    static __host__ __device__ compute_t to_compute(__nv_bfloat16 x) {
+        return __bfloat162float(x);
+    }
+    static __host__ __device__ __nv_bfloat16 from_compute(compute_t x) {
+        return __float2bfloat16(x);
+    }
 };

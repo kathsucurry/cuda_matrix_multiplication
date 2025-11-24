@@ -1,4 +1,4 @@
-#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <iostream>
 #include <stdio.h>
 #include <string>
@@ -30,8 +30,8 @@ int main(int argc, char **argv) {
 
     // Prepare host and device matrices variables.
     // Define the type (float/fp32, ...) accordingly.
-    half *A{nullptr}, *B{nullptr}, *C{nullptr}, *C_ref{nullptr};
-    half *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *C_ref_d{nullptr};
+    __nv_bfloat16 *A{nullptr}, *B{nullptr}, *C{nullptr}, *C_ref{nullptr};
+    __nv_bfloat16 *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *C_ref_d{nullptr};
     prepare_matrices(A, B, C, C_ref, A_d, B_d, C_d, C_ref_d, max_matrix_size);
 
     measure_performance(

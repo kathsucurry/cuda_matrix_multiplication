@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda/std/type_traits>
 #include <cuda_runtime.h>
 #include <iomanip>
 #include <iostream>
@@ -8,7 +9,8 @@
 #include "traits.cuh"
 
 
-#define EPS 1e-2
+#define EPS_FP32 1e-2
+#define EPS_FP16 5.0
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
 #define KERNEL_NUM 10
 #define CHECK_CUDA_ERROR(value) check_cuda_error((value), #value, __FILE__, __LINE__)
@@ -22,7 +24,7 @@ int get_kernel_input(int argc, char **argv);
 
 template <typename T>
 void randomize_matrix(T *matrix, size_t N) {
-    using traits = scalar_traits<T>;
+    using traits = float_traits<T>;
     using compute_t = typename traits::compute_t;
 
     struct timeval time{};
@@ -39,17 +41,20 @@ void randomize_matrix(T *matrix, size_t N) {
 
 template <typename T>
 bool verify_matrix(T *matrix_1, T *matrix_2, size_t N) {
-    using traits = scalar_traits<T>;
-    using compute_t = typename traits::compute_t;
+    using traits = float_traits<T>;
     
     double diff{0.0};
+    double eps{::cuda::std::is_same_v<T, float> ? EPS_FP32 : EPS_FP16};
+
 
     for (size_t i{0}; i < N; ++i) {
-        diff = std::fabs(static_cast<double>(__half2float(matrix_1[i])) - static_cast<double>(__half2float(matrix_2[i])));
-        if (isnan(diff) || diff > EPS) {
+        diff = std::fabs(
+            static_cast<double>(traits::to_compute(matrix_1[i])) -
+            static_cast<double>(traits::to_compute(matrix_2[i])));
+        if (isnan(diff) || diff > eps) {
             printf(
                 "Divergence encountered with at %zu with diff %5.4f; expected: %5.4f but actual: %5.4f\n",
-                i, diff, compute_t(matrix_1[i]), compute_t(matrix_2[i]));
+                i, diff, traits::to_compute(matrix_1[i]), traits::to_compute(matrix_2[i]));
             return false;
         }
     }    
