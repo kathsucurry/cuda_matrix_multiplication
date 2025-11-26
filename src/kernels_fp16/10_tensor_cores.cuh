@@ -74,7 +74,6 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
         nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frags[NUM_WMMA_M][NUM_WMMA_N];
     nvcuda::wmma::fragment<
         nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-    
 
     // Initialize the accumulator fragments.
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx)

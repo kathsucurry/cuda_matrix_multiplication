@@ -19,3 +19,4 @@
 #include "kernels_fp16/05_warptiling.cuh"
 #include "kernels_fp16/09_memcpy_async.cuh"
 #include "kernels_fp16/10_tensor_cores.cuh"
+#include "kernels_fp16/11_tensor_cores_memcpy_async.cuh"
