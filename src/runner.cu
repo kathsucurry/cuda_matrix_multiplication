@@ -22,10 +22,10 @@ void run_cublas(
 
 void run_cublas(
     cublasHandle_t handle, int M, int N, int K, float alpha,
-    __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, __nv_bfloat16 *C
+    __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C
 ) {
     cublasStatus_t status = cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_16BF,
-                 K, A, CUDA_R_16BF, K, &beta, C, CUDA_R_16BF, N, CUBLAS_COMPUTE_32F,
+                 K, A, CUDA_R_16BF, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F,
                  CUBLAS_GEMM_DEFAULT);
     
     if (status != CUBLAS_STATUS_SUCCESS) {
@@ -94,7 +94,7 @@ void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float b
 }
 
 
-void run_vectorize(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, __nv_bfloat16 *C) {
+void run_vectorize(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C) {
     constexpr uint BLOCK_DIM{128};
     // BM: the size of block vertically; BN: the size of block horizontally. 
     constexpr uint BM{BLOCK_DIM}, BN{BLOCK_DIM};
@@ -116,6 +116,34 @@ void run_vectorize(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bflo
 
 
 void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    constexpr uint NUM_THREADS{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    constexpr uint BM{128}, BN{128};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    constexpr uint TM{16}, TN{8};
+    constexpr uint BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * NUM_THREADS) == 0) && ((BK * BN) % (4 * NUM_THREADS) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    constexpr uint WM{32}, WN{128};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
+
+    static_assert(WM * WN / 32 == TM * TN);
+
+    dim3 block_dim(NUM_THREADS);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    warptiling_gemm<NUM_THREADS, BM, BN, BK, WM, WN, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+void run_warptiling(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C) {
     // The overall method can be separated into two steps:
     // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
     // 2) Compute the dot product between elements --> where warptiling is implemented.
@@ -271,7 +299,7 @@ void run_double_buffering(int M, int N, int K, float alpha, float *A, float *B, 
 }
 
 
-void run_double_buffering(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, __nv_bfloat16 *C) {
+void run_double_buffering(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C) {
     // The overall method can be separated into two steps:
     // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
     // 2) Compute the dot product between elements --> where warptiling is implemented.
@@ -300,6 +328,35 @@ void run_double_buffering(int M, int N, int K, float alpha, __nv_bfloat16 *A, __
     dim3 block_dim(NUM_THREADS);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
     double_buffering_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WNITER, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+void run_tensor_cores(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    constexpr uint NUM_THREADS{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    constexpr uint BM{128}, BN{128};
+    constexpr uint BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * NUM_THREADS) == 0) && ((BK * BN) % (4 * NUM_THREADS) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    constexpr uint WM{32}, WN{128};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
+
+    // Options include: 16x16x16, 32x8x16, 8x32x16, 16x16x8.
+    constexpr uint WMMA_M{16};
+    constexpr uint WMMA_N{16};
+    constexpr uint WMMA_K{16};
+
+    dim3 block_dim(NUM_THREADS);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    tensor_cores_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WMMA_M, WMMA_N, WMMA_K>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
@@ -347,8 +404,8 @@ void run_kernel(
 
 
 void run_kernel(
-    int kernel_num, int M, int N, int K, __nv_bfloat16 alpha, __nv_bfloat16 *A, __nv_bfloat16 *B,
-    __nv_bfloat16 beta, __nv_bfloat16 *C, cublasHandle_t handle
+    int kernel_num, int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B,
+    float beta, float *C, cublasHandle_t handle
 ) {
     switch (kernel_num) {
     case 0:
@@ -361,8 +418,14 @@ void run_kernel(
         assert((N % 2 == 0) && (K % 2 == 0));
         run_vectorize(M, N, K, alpha, A, B, beta, C);
         break;
+    case 5:
+        run_warptiling(M, N, K, alpha, A, B, beta, C);
+        break;
     case 9:
         run_double_buffering(M, N, K, alpha, A, B, beta, C);
+        break;
+    case 10:
+        run_tensor_cores(M, N, K, alpha, A, B, beta, C);
         break;
     default:
         throw std::invalid_argument("Invalid kernel number.");

@@ -9,7 +9,7 @@
 template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK, uint const TM, uint const TN>
 __global__ void __launch_bounds__(NUM_THREADS) vectorize_gemm(
     int M, int N, int K, float alpha,
-    __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, float beta, __nv_bfloat16 *__restrict__ C
+    __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, float beta, float *__restrict__ C
 ) {
     __shared__ __nv_bfloat16 As[BM * BK];
     __shared__ __nv_bfloat16 Bs[BK * BN];
@@ -75,20 +75,21 @@ __global__ void __launch_bounds__(NUM_THREADS) vectorize_gemm(
     }
 
     for (int tile_y_idx{0}; tile_y_idx < TM; ++tile_y_idx) {
-        for (int tile_x_idx{0}; tile_x_idx < TN; tile_x_idx += 2) {
+        for (int tile_x_idx{0}; tile_x_idx < TN; tile_x_idx += 4) {
             uint const cell_row_idx{threadIdx_y * TM + tile_y_idx};
             uint const cell_col_idx{threadIdx_x * TN + tile_x_idx};
 
-            __nv_bfloat162 C_tmp = reinterpret_cast<__nv_bfloat162 *>(
+            float4 tmp = reinterpret_cast<float4 *>(
                 &C[cell_row_idx * N + cell_col_idx]
             )[0];
 
-            float2 tmp;           
-            tmp.x = alpha * out_values[tile_y_idx * TN + tile_x_idx + 0] + beta * __bfloat162float(C_tmp.x);
-            tmp.y = alpha * out_values[tile_y_idx * TN + tile_x_idx + 1] + beta * __bfloat162float(C_tmp.y);
-            reinterpret_cast<__nv_bfloat162 *>(
+            tmp.x = alpha * out_values[tile_y_idx * TN + tile_x_idx + 0] + beta * tmp.x;
+            tmp.y = alpha * out_values[tile_y_idx * TN + tile_x_idx + 1] + beta * tmp.y;
+            tmp.z = alpha * out_values[tile_y_idx * TN + tile_x_idx + 2] + beta * tmp.z;
+            tmp.w = alpha * out_values[tile_y_idx * TN + tile_x_idx + 3] + beta * tmp.w;
+            reinterpret_cast<float4 *>(
                 &C[cell_row_idx * N + cell_col_idx]
-            )[0] = __float22bfloat162_rn(tmp);
+            )[0] = tmp;
         }
     }
 }

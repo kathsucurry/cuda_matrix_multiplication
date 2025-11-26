@@ -83,7 +83,7 @@ template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK,
     uint const WM, uint const WN, uint const WNITER, uint const TM, uint const TN>
 __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     int M, int N, int K, float alpha,
-    __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, float beta, __nv_bfloat16 *__restrict__ C
+    __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, float beta, float *__restrict__ C
 ) {
     __shared__ __nv_bfloat16 As[2][BM * BK];
     __shared__ __nv_bfloat16 Bs[2][BK * BN];
@@ -172,21 +172,22 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
             uint const tile_col_idx{warp_col_offset + wniter_idx * WSUBN + thread_col_in_warp * TN};
             
             for (int tm_idx{0}; tm_idx < TM; ++tm_idx)
-                for (int tn_idx{0}; tn_idx < TN; tn_idx += 2) {
+                for (int tn_idx{0}; tn_idx < TN; tn_idx += 4) {
                     uint const cell_row_idx{tile_row_idx + tm_idx};
                     uint const cell_col_idx{tile_col_idx + tn_idx};
                     
-                    __nv_bfloat162 C_tmp = reinterpret_cast<__nv_bfloat162 *>(
+                    float4 tmp = reinterpret_cast<float4 *>(
                         &C[cell_row_idx * N + cell_col_idx]
                         )[0];
 
-                    float2 tmp;
                     uint const first_out_idx = (wmiter_idx * TM + tm_idx) * (WNITER * TN) + wniter_idx * TN + tn_idx;
-                    tmp.x = alpha * out_values[first_out_idx + 0] + beta * __bfloat162float(C_tmp.x);
-                    tmp.y = alpha * out_values[first_out_idx + 1] + beta * __bfloat162float(C_tmp.y);
-                    reinterpret_cast<__nv_bfloat162 *>(
+                    tmp.x = alpha * out_values[first_out_idx + 0] + beta * tmp.x;
+                    tmp.y = alpha * out_values[first_out_idx + 1] + beta * tmp.y;
+                    tmp.z = alpha * out_values[first_out_idx + 2] + beta * tmp.z;
+                    tmp.w = alpha * out_values[first_out_idx + 3] + beta * tmp.w;
+                    reinterpret_cast<float4 *>(
                         &C[cell_row_idx * N + cell_col_idx]
-                    )[0] = __float22bfloat162_rn(tmp);
+                    )[0] = tmp;
                 }
         }       
 }
