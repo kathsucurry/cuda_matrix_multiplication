@@ -5,8 +5,8 @@
             "name": "CUDA C++: Launch",
             "type": "cuda-gdb",
             "request": "launch",
-            "program": "${workspaceFolder}/build/matmul",
-            "args": ["6"]
+            "program": "${workspaceFolder}/build/half_matmul",
+            "args": ["10"]
         },
         {
             "name": "CUDA C++: Attach",

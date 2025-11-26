@@ -43,12 +43,9 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
     constexpr uint NUM_WMMA_M{WM / WMMA_M};
     constexpr uint NUM_WMMA_N{WN / WMMA_N};
 
-    uint const lane_idx{threadIdx.x % 32};
     uint const warp_idx{threadIdx.x / 32};
     uint const warp_row_offset{(warp_idx / (BN / WN)) * WM};
     uint const warp_col_offset{(warp_idx % (BN / WN)) * WN};
-    uint const thread_row_offset{(lane_idx / (NUM_WMMA_N)) * WMMA_M};
-    uint const thread_col_offset{(lane_idx % (NUM_WMMA_N)) * WMMA_N};
 
     {
         uint const block_row_offset{blockIdx.y * BM};
@@ -98,18 +95,18 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
         B += BK * N;
 
         // Execute the dot product.
-        for (uint k_offset{0u}; k_offset < BK; k_offset += WMMA_K) {
+        for (uint wmma_k_offset{0u}; wmma_k_offset < BK; wmma_k_offset += WMMA_K) {
             for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
                 nvcuda::wmma::load_matrix_sync(
                     a_frags[wmma_row_idx],
-                    &As[(warp_row_offset + thread_row_offset + wmma_row_idx * WMMA_M) * BK + k_offset],
+                    &As[(warp_row_offset + wmma_row_idx * WMMA_M) * BK + wmma_k_offset],
                     BK
                 );
 
                 for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
                     nvcuda::wmma::load_matrix_sync(
                         b_frags[wmma_col_idx],
-                        &Bs[k_offset * BN + (warp_col_offset + thread_col_offset + wmma_col_idx * WMMA_N)],
+                        &Bs[wmma_k_offset * BN + (warp_col_offset + wmma_col_idx * WMMA_N)],
                         BN
                     );
     
@@ -128,18 +125,23 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
 
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
-            uint const C_row_offset{warp_row_offset + thread_row_offset + wmma_row_idx * WMMA_M};
-            uint const C_col_offset{warp_col_offset + thread_col_offset + wmma_col_idx * WMMA_N};
+            uint const C_row_offset{warp_row_offset + wmma_row_idx * WMMA_M};
+            uint const C_col_offset{warp_col_offset + wmma_col_idx * WMMA_N};
+
+            nvcuda::wmma::load_matrix_sync(
+                c_frag,
+                &C[C_row_offset * N + C_col_offset],
+                N,
+                nvcuda::wmma::mem_row_major
+            );
 
             for (int i{0}; i < c_frag.num_elements; ++i) {
-                uint const row{i / WMMA_N};
-                uint const col{i % WMMA_N};
-                uint const C_idx{(C_row_offset + row) * N + (C_col_offset + col)};
-
-                c_frag.x[i] = __bfloat162float(C[C_idx]);
                 c_frag.x[i] = alpha * acc_frags[wmma_row_idx][wmma_col_idx].x[i] + beta * c_frag.x[i];
-                C[C_idx] = __float2bfloat16(c_frag.x[i]);
             }
+
+            nvcuda::wmma::store_matrix_sync(
+                &C[C_row_offset * N + C_col_offset], c_frag, N, nvcuda::wmma::mem_row_major
+            );
         }
     }
 }

@@ -341,11 +341,19 @@ void run_tensor_cores(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_b
     // BM: the size of block vertically; BN: the size of block horizontally. 
     constexpr uint BM{128}, BN{128};
     constexpr uint BK{32};
-    // Updated requirement given that we use float4 for vectorizing.
-    static_assert(((BK * BM) % (4 * NUM_THREADS) == 0) && ((BK * BN) % (4 * NUM_THREADS) == 0));
+
+    // constexpr uint NUM_THREADS{64};
+    // constexpr uint BM{64}, BN{64};
+    // constexpr uint BK{16};
+
+
+    // Updated requirement given that we use float4 for vectorizing the load.
+    static_assert(((BK * BM) % (2 * NUM_THREADS) == 0) && ((BK * BN) % (2 * NUM_THREADS) == 0));
     
     // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
     constexpr uint WM{32}, WN{128};
+
+    // constexpr uint WM{32}, WN{64};
     static_assert((BN % WN == 0) && (BM % WM == 0));
     static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
 
@@ -353,6 +361,8 @@ void run_tensor_cores(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_b
     constexpr uint WMMA_M{16};
     constexpr uint WMMA_N{16};
     constexpr uint WMMA_K{16};
+
+    static_assert((BK % WMMA_K == 0) && (WM % WMMA_M == 0) && (WN % WMMA_N == 0));
 
     dim3 block_dim(NUM_THREADS);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
