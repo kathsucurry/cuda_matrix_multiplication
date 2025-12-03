@@ -33,14 +33,14 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
         C += block_row_offset * N + block_col_offset;
     }
 
-    constexpr uint stride_A{(NUM_THREADS << 1) / BK};
-    constexpr uint stride_B{(NUM_THREADS << 1) / BN};
+    constexpr uint stride_A{(NUM_THREADS << 3) / BK};
+    constexpr uint stride_B{(NUM_THREADS << 3) / BN};
 
     // For storing into shared memory.
-    uint const A_block_row_idx{threadIdx.x / (BK >> 1)};
-    uint const A_block_col_idx{(threadIdx.x % (BK >> 1)) << 1};
-    uint const B_block_row_idx{threadIdx.x / (BN >> 1)};
-    uint const B_block_col_idx{(threadIdx.x % (BN >> 1)) << 1};
+    uint const A_block_row_idx{threadIdx.x / (BK >> 3)};
+    uint const A_block_col_idx{(threadIdx.x % (BK >> 3)) << 3};
+    uint const B_block_row_idx{threadIdx.x / (BN >> 3)};
+    uint const B_block_col_idx{(threadIdx.x % (BN >> 3)) << 3};
 
     // Define the matrix fragment size here since the implementation (e.g., fragment
     // layout) depends on the size.
@@ -138,21 +138,22 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
             // Follow the fragment layout described in PTX ISA.
             uint const fragment_row_offset{lane_idx / 4};
             uint const fragment_col_offset{(lane_idx % 4) * 2};
-            C_register[0] = C_pointer[fragment_row_offset       * N + fragment_col_offset + 0];
-            C_register[1] = C_pointer[fragment_row_offset       * N + fragment_col_offset + 1];
-            C_register[2] = C_pointer[(fragment_row_offset + 8) * N + fragment_col_offset + 0];
-            C_register[3] = C_pointer[(fragment_row_offset + 8) * N + fragment_col_offset + 1];
+
+            reinterpret_cast<float2 *>(&C_register[0])[0] =
+                reinterpret_cast<float2 *>(&C_pointer[fragment_row_offset * N + fragment_col_offset])[0];
+            reinterpret_cast<float2 *>(&C_register[2])[0] =
+                reinterpret_cast<float2 *>(&C_pointer[(fragment_row_offset + 8) * N + fragment_col_offset])[0];
 
             // Compute alpha * (AB) + beta * C.
             C_register[0] = acc_register[mma_row_idx][mma_col_idx][0] * alpha + C_register[0] * beta;
             C_register[1] = acc_register[mma_row_idx][mma_col_idx][1] * alpha + C_register[1] * beta;
             C_register[2] = acc_register[mma_row_idx][mma_col_idx][2] * alpha + C_register[2] * beta;
             C_register[3] = acc_register[mma_row_idx][mma_col_idx][3] * alpha + C_register[3] * beta;
-
-            C_pointer[fragment_row_offset       * N + fragment_col_offset + 0] = C_register[0];
-            C_pointer[fragment_row_offset       * N + fragment_col_offset + 1] = C_register[1];
-            C_pointer[(fragment_row_offset + 8) * N + fragment_col_offset + 0] = C_register[2];
-            C_pointer[(fragment_row_offset + 8) * N + fragment_col_offset + 1] = C_register[3];
+        
+            reinterpret_cast<float2 *>(&C_pointer[fragment_row_offset * N + fragment_col_offset])[0] =
+                reinterpret_cast<float2 *>(&C_register[0])[0];
+            reinterpret_cast<float2 *>(&C_pointer[(fragment_row_offset + 8) * N + fragment_col_offset])[0] =
+                reinterpret_cast<float2 *>(&C_register[2])[0];
         }
     }
 }

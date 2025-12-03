@@ -22,7 +22,6 @@ __device__ __forceinline__ void load_from_gmem(
             8 * sizeof(__nv_bfloat16)
         );
     }
-    __pipeline_commit();
         
     for (int B_load_offset{0}; B_load_offset < BK; B_load_offset += stride_B) {
         __pipeline_memcpy_async(
@@ -37,7 +36,7 @@ __device__ __forceinline__ void load_from_gmem(
 template <uint const BN, uint const BK,
           uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,
           uint const NUM_WMMA_M, uint const NUM_WMMA_N>
-__device__ void compute_gemm(
+__device__ __forceinline__ void compute_gemm(
     __nv_bfloat16 *__restrict__ As,
     __nv_bfloat16 *__restrict__ Bs,
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frag,
@@ -83,8 +82,8 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_memcpy_async_gemm(
     float beta,
     float         *__restrict__ C
 ) {
-    __shared__ __nv_bfloat16 As[2][BM * BK];
-    __shared__ __nv_bfloat16 Bs[2][BK * BN];
+    __shared__ __nv_bfloat16 As[BM * BK];
+    __shared__ __nv_bfloat16 Bs[BK * BN];
 
     constexpr uint NUM_WMMA_M{WM / WMMA_M};
     constexpr uint NUM_WMMA_N{WN / WMMA_N};
@@ -126,45 +125,26 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_memcpy_async_gemm(
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx)
             nvcuda::wmma::fill_fragment(acc_frags[wmma_row_idx][wmma_col_idx], 0.0f);
 
-    int current{0};
-
-    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
-        A, B, N, K,
-        As[current], Bs[current],
-        A_block_row_idx, A_block_col_idx,
-        B_block_row_idx, B_block_col_idx,
-        stride_A, stride_B
-    );
-    __pipeline_wait_prior(0);
-    __syncthreads();
-
-    for (int k_offset{0}; k_offset < K - BK; k_offset += BK) {
-        A += BK;
-        B += BK * N;
-
+    for (int k_offset{0}; k_offset < K; k_offset += BK) {
         wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
             A, B, N, K,
-            As[current ^ 1], Bs[current ^ 1],
+            As, Bs,
             A_block_row_idx, A_block_col_idx,
             B_block_row_idx, B_block_col_idx,
             stride_A, stride_B
         );
-        __pipeline_wait_prior(BM / stride_A + BK / stride_B);
+        __pipeline_wait_prior(0);
+
+        A += BK;
+        B += BK * N;
+
         __syncthreads();
 
         // Execute the dot product.
         wt_tc_memcpy_async::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
-            As[current], Bs[current], a_frag, b_frag, acc_frags, warp_row_offset, warp_col_offset);
+            As, Bs, a_frag, b_frag, acc_frags, warp_row_offset, warp_col_offset);
         __syncthreads();
-
-        current ^= 1;
     }
-    __pipeline_wait_prior(0);
-    __syncthreads();
-
-    wt_tc_memcpy_async::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
-            As[current], Bs[current], a_frag, b_frag, acc_frags, warp_row_offset, warp_col_offset);
-     __syncthreads();
 
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
