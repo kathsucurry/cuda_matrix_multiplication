@@ -67,9 +67,9 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
 
     // Declare fragments.
     nvcuda::wmma::fragment<
-        nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frags[NUM_WMMA_M];
+        nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frag;
     nvcuda::wmma::fragment<
-        nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> b_frags[NUM_WMMA_N];
+        nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> b_frag;
     nvcuda::wmma::fragment<
         nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frags[NUM_WMMA_M][NUM_WMMA_N];
     nvcuda::wmma::fragment<
@@ -97,14 +97,14 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
         for (uint wmma_k_offset{0u}; wmma_k_offset < BK; wmma_k_offset += WMMA_K) {
             for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
                 nvcuda::wmma::load_matrix_sync(
-                    a_frags[wmma_row_idx],
+                    a_frag,
                     &As[(warp_row_offset + wmma_row_idx * WMMA_M) * BK + wmma_k_offset],
                     BK
                 );
 
                 for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
                     nvcuda::wmma::load_matrix_sync(
-                        b_frags[wmma_col_idx],
+                        b_frag,
                         &Bs[wmma_k_offset * BN + (warp_col_offset + wmma_col_idx * WMMA_N)],
                         BN
                     );
@@ -112,8 +112,8 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
                     // Perform matrix multiplication.
                     nvcuda::wmma::mma_sync(
                         acc_frags[wmma_row_idx][wmma_col_idx],
-                        a_frags[wmma_row_idx],
-                        b_frags[wmma_col_idx],
+                        a_frag,
+                        b_frag,
                         acc_frags[wmma_row_idx][wmma_col_idx]
                     );
                 }
