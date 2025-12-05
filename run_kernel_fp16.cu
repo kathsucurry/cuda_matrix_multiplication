@@ -10,6 +10,7 @@
 
 int main(int argc, char **argv) {
     int const kernel_num = get_kernel_input(argc, argv);
+    // int const kernel_num = 13;
 
     // Set CUDA context.
     CHECK_CUDA_ERROR(cudaSetDevice(0));
