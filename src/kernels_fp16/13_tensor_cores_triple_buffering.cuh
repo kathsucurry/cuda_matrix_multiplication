@@ -20,8 +20,8 @@ __device__ __forceinline__ void load_from_smem(
     uint16_t const warp_row_offset, uint16_t const warp_col_offset
 ) {
 #pragma unroll
-    for (uint16_t wmma_k_idx{0u}; wmma_k_idx < NUM_WMMA_K; ++wmma_k_idx) {
-        uint16_t const wmma_k_offset{wmma_k_idx * WMMA_K};
+    for (uint16_t wmma_k_idx{0}; wmma_k_idx < NUM_WMMA_K; ++wmma_k_idx) {
+        uint16_t const wmma_k_offset{static_cast<uint16_t>(wmma_k_idx * WMMA_K)};
 
         // Load A elements from smem to registers.
 #pragma unroll
@@ -89,13 +89,13 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
     constexpr uint16_t NUM_WMMA_N{WN / WMMA_N};
     constexpr uint16_t NUM_WMMA_K{BK / WMMA_K};
 
-    uint16_t const warp_idx{threadIdx.x / 32};
-    uint16_t const warp_row_offset{(warp_idx / (BN / WN)) * WM};
-    uint16_t const warp_col_offset{(warp_idx % (BN / WN)) * WN};
+    uint const warp_idx{threadIdx.x / 32};
+    uint16_t const warp_row_offset{static_cast<uint16_t>((warp_idx / (BN / WN)) * WM)};
+    uint16_t const warp_col_offset{static_cast<uint16_t>((warp_idx % (BN / WN)) * WN)};
 
     {
-        uint16_t const block_row_offset{blockIdx.y * BM};
-        uint16_t const block_col_offset{blockIdx.x * BN};
+        uint const block_row_offset{blockIdx.y * BM};
+        uint const block_col_offset{blockIdx.x * BN};
 
         A += block_row_offset * K;
         B += block_col_offset;
@@ -106,10 +106,10 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
     constexpr uint16_t stride_B{(NUM_THREADS << 3) / BN};
 
     // For storing into shared memory.
-    uint16_t const A_block_row_idx{threadIdx.x / (BK >> 3)};
-    uint16_t const A_block_col_idx{(threadIdx.x % (BK >> 3)) << 3};
-    uint16_t const B_block_row_idx{threadIdx.x / (BN >> 3)};
-    uint16_t const B_block_col_idx{(threadIdx.x % (BN >> 3)) << 3};
+    uint16_t const A_block_row_idx{static_cast<uint16_t>(threadIdx.x / (BK >> 3))};
+    uint16_t const A_block_col_idx{static_cast<uint16_t>((threadIdx.x % (BK >> 3)) << 3)};
+    uint16_t const B_block_row_idx{static_cast<uint16_t>(threadIdx.x / (BN >> 3))};
+    uint16_t const B_block_col_idx{static_cast<uint16_t>((threadIdx.x % (BN >> 3)) << 3)};
 
     // Declare fragments.
     nvcuda::wmma::fragment<
@@ -215,8 +215,8 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
 
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
-            uint16_t const C_row_offset{warp_row_offset + wmma_row_idx * WMMA_M};
-            uint16_t const C_col_offset{warp_col_offset + wmma_col_idx * WMMA_N};
+            uint16_t const C_row_offset{static_cast<uint16_t>(warp_row_offset + wmma_row_idx * WMMA_M)};
+            uint16_t const C_col_offset{static_cast<uint16_t>(warp_col_offset + wmma_col_idx * WMMA_N)};
 
             nvcuda::wmma::load_matrix_sync(
                 c_frag,
