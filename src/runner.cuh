@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "utils.cuh"
+#include "host_utils.cuh"
 #include "kernels.cuh"
 
 
@@ -22,31 +22,42 @@ void run_kernel(
 );
 
 
-template <typename T, typename U>
-void run_naive(int M, int N, int K, float alpha, T *A, T *B, float beta, U *C) {
+template <typename T>
+void run_naive(int M, int N, int K, float alpha, T *A, T *B, float beta, float *C) {
     constexpr uint BLOCK_DIM{32};
     assert((N % BLOCK_DIM == 0) && (M % BLOCK_DIM == 0));
 
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
 
-    naive_gemm<T, U, BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+    naive_gemm<T, BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+template <typename T>
+void run_sharedmem_block_tiling(int M, int N, int K, float alpha, T *A, T *B, float beta, float *C) {
+    constexpr uint BLOCK_DIM{32};
+    assert((N % BLOCK_DIM == 0) && (M % BLOCK_DIM == 0) && (K % BLOCK_DIM == 0));
+
+    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
+    dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
+
+    block_tiling_gemm<T, BLOCK_DIM><<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
 
-template <typename T, typename U>
+template <typename T>
 void measure_performance(
     std::vector<uint> const MATRIX_SIZE,
     cublasHandle_t cublas_handle,
     int const kernel_num,
-    T *&A,
-    T *&B,
-    U *&C,
-    U *&C_ref,
-    T *&A_d,
-    T *&B_d,
-    U *&C_d,
-    U *&C_ref_d
+    T     *&A,
+    T     *&B,
+    float *&C,
+    float *&C_ref,
+    T     *&A_d,
+    T     *&B_d,
+    float *&C_d,
+    float *&C_ref_d
 ) {
     // Define matmul parameters: C = α * AB + β * C.
     constexpr float alpha{0.5f};
@@ -76,8 +87,8 @@ void measure_performance(
             run_kernel(kernel_num, M, N, K, alpha, A_d, B_d, beta, C_d, cublas_handle);
             CHECK_LAST_CUDA_ERROR();
 
-            CHECK_CUDA_ERROR(cudaMemcpy(C_ref, C_ref_d, sizeof(U) * M * N, cudaMemcpyDeviceToHost));
-            CHECK_CUDA_ERROR(cudaMemcpy(C, C_d, sizeof(U) * M * N, cudaMemcpyDeviceToHost));
+            CHECK_CUDA_ERROR(cudaMemcpy(C_ref, C_ref_d, sizeof(float) * M * N, cudaMemcpyDeviceToHost));
+            CHECK_CUDA_ERROR(cudaMemcpy(C, C_d, sizeof(float) * M * N, cudaMemcpyDeviceToHost));
 
             if (!verify_matrix(C_ref, C, M * N)) {
                 std::cerr << "The kernel function implementation is not correct compared to cuBLAS results." << std::endl;

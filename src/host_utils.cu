@@ -1,4 +1,4 @@
-#include "utils.cuh"
+#include "host_utils.cuh"
 
 
 void check_cuda_error(cudaError_t error, char const *func, char const *file, int line) {

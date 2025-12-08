@@ -7,21 +7,21 @@
 #include "11_tensor_cores_memcpy_async.cuh"
 
 
-namespace wt_tc_triple_buffer {
+namespace wt_tc_two_level_pipeline {
 
-template <uint16_t const BN, uint16_t const BK,
-      uint16_t const WMMA_M, uint16_t const WMMA_N, uint16_t const WMMA_K,
-      uint16_t const NUM_WMMA_M, uint16_t const NUM_WMMA_N, uint16_t const NUM_WMMA_K>
+template <uint const BN, uint const BK,
+      uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,
+      uint const NUM_WMMA_M, uint const NUM_WMMA_N, uint const NUM_WMMA_K>
 __device__ __forceinline__ void load_from_smem(
     __nv_bfloat16 *__restrict__ As,
     __nv_bfloat16 *__restrict__ Bs,
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frags[NUM_WMMA_M][NUM_WMMA_K],
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> b_frags[NUM_WMMA_K][NUM_WMMA_N],
-    uint16_t const warp_row_offset, uint16_t const warp_col_offset
+    uint const warp_row_offset, uint const warp_col_offset
 ) {
 #pragma unroll
-    for (uint16_t wmma_k_idx{0}; wmma_k_idx < NUM_WMMA_K; ++wmma_k_idx) {
-        uint16_t const wmma_k_offset{static_cast<uint16_t>(wmma_k_idx * WMMA_K)};
+    for (uint wmma_k_idx{0}; wmma_k_idx < NUM_WMMA_K; ++wmma_k_idx) {
+        uint const wmma_k_offset{wmma_k_idx * WMMA_K};
 
         // Load A elements from smem to registers.
 #pragma unroll
@@ -46,16 +46,16 @@ __device__ __forceinline__ void load_from_smem(
 }
 
 
-template <uint16_t const BN, uint16_t const BK,
-      uint16_t const WMMA_M, uint16_t const WMMA_N, uint16_t const WMMA_K,
-      uint16_t const NUM_WMMA_M, uint16_t const NUM_WMMA_N, uint16_t const NUM_WMMA_K>
+template <uint const BN, uint const BK,
+      uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,
+      uint const NUM_WMMA_M, uint const NUM_WMMA_N, uint const NUM_WMMA_K>
 __device__ __forceinline__ void compute_gemm(
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frags[NUM_WMMA_M][NUM_WMMA_K],
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> b_frags[NUM_WMMA_K][NUM_WMMA_N],
     nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frags[NUM_WMMA_M][NUM_WMMA_N]
 ) {
 #pragma unroll
-    for (uint16_t wmma_k_idx{0u}; wmma_k_idx < NUM_WMMA_K; ++wmma_k_idx) {
+    for (uint wmma_k_idx{0u}; wmma_k_idx < NUM_WMMA_K; ++wmma_k_idx) {
 #pragma unroll
         for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
 #pragma unroll
@@ -73,9 +73,9 @@ __device__ __forceinline__ void compute_gemm(
 };
 
 
-template <uint16_t const NUM_THREADS, uint16_t const BM, uint16_t const BN, uint16_t const BK,
-          uint16_t const WM, uint16_t const WN, uint16_t const WMMA_M, uint16_t const WMMA_N, uint16_t const WMMA_K>
-__global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gemm(
+template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK,
+          uint const WM, uint const WN, uint const WMMA_M, uint const WMMA_N, uint const WMMA_K>
+__global__ void __launch_bounds__(NUM_THREADS) tensor_cores_two_level_pipeline_gemm(
     int M, int N, int K, float alpha,
     __nv_bfloat16 *__restrict__ A,
     __nv_bfloat16 *__restrict__ B,
@@ -85,13 +85,13 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
     __shared__ __nv_bfloat16 As[2][BM * BK];
     __shared__ __nv_bfloat16 Bs[2][BK * BN];
 
-    constexpr uint16_t NUM_WMMA_M{WM / WMMA_M};
-    constexpr uint16_t NUM_WMMA_N{WN / WMMA_N};
-    constexpr uint16_t NUM_WMMA_K{BK / WMMA_K};
+    constexpr uint NUM_WMMA_M{WM / WMMA_M};
+    constexpr uint NUM_WMMA_N{WN / WMMA_N};
+    constexpr uint NUM_WMMA_K{BK / WMMA_K};
 
     uint const warp_idx{threadIdx.x / 32};
-    uint16_t const warp_row_offset{static_cast<uint16_t>((warp_idx / (BN / WN)) * WM)};
-    uint16_t const warp_col_offset{static_cast<uint16_t>((warp_idx % (BN / WN)) * WN)};
+    uint const warp_row_offset{(warp_idx / (BN / WN)) * WM};
+    uint const warp_col_offset{(warp_idx % (BN / WN)) * WN};
 
     {
         uint const block_row_offset{blockIdx.y * BM};
@@ -101,16 +101,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
         B += block_col_offset;
         C += block_row_offset * N + block_col_offset;
     }
-
-    constexpr uint16_t stride_A{(NUM_THREADS << 3) / BK};
-    constexpr uint16_t stride_B{(NUM_THREADS << 3) / BN};
-
-    // For storing into shared memory.
-    uint16_t const A_block_row_idx{static_cast<uint16_t>(threadIdx.x / (BK >> 3))};
-    uint16_t const A_block_col_idx{static_cast<uint16_t>((threadIdx.x % (BK >> 3)) << 3)};
-    uint16_t const B_block_row_idx{static_cast<uint16_t>(threadIdx.x / (BN >> 3))};
-    uint16_t const B_block_col_idx{static_cast<uint16_t>((threadIdx.x % (BN >> 3)) << 3)};
-
+    
     // Declare fragments.
     nvcuda::wmma::fragment<
         nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frags[NUM_WMMA_M][NUM_WMMA_K];
@@ -126,36 +117,30 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx)
             nvcuda::wmma::fill_fragment(acc_frags[wmma_row_idx][wmma_col_idx], 0.0f);
 
-    // Load from gmem to smem.
-    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
+    // Stage 1: shared-memory stores.
+    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
         A, B, N, K,
         As[0], Bs[0],
-        A_block_row_idx, A_block_col_idx,
-        B_block_row_idx, B_block_col_idx,
-        stride_A, stride_B
+        threadIdx.x
     );
 
     A += BK;
     B += BK * N;
 
-    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
+    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
         A, B, N, K,
         As[1], Bs[1],
-        A_block_row_idx, A_block_col_idx,
-        B_block_row_idx, B_block_col_idx,
-        stride_A, stride_B
+        threadIdx.x
     );
 
     // Load from smem to registers.
     __pipeline_wait_prior(1);
     __syncthreads();
 
-    wt_tc_triple_buffer::load_from_smem<
+    wt_tc_two_level_pipeline::load_from_smem<
         BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K
     >(
-        As[0], Bs[0],
-        a_frags, b_frags,
-        warp_row_offset, warp_col_offset
+        As[0], Bs[0], a_frags, b_frags, warp_row_offset, warp_col_offset
     );
 
     int current{0};
@@ -168,23 +153,21 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
         __syncthreads();
 
         // Load from gmem to smem, replacing the current smem.
-        wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
+        wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As[current], Bs[current],
-            A_block_row_idx, A_block_col_idx,
-            B_block_row_idx, B_block_col_idx,
-            stride_A, stride_B
+            threadIdx.x
         );
 
         // Execute the dot product.
-        wt_tc_triple_buffer::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
+        wt_tc_two_level_pipeline::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
             a_frags, b_frags, acc_frags);
 
         // Load from smem to registers.
         __pipeline_wait_prior(1);
         __syncthreads();
 
-        wt_tc_triple_buffer::load_from_smem<
+        wt_tc_two_level_pipeline::load_from_smem<
             BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K
         >(
             As[current ^ 1], Bs[current ^ 1],
@@ -197,10 +180,10 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_tc_triple_buffer::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
+    wt_tc_two_level_pipeline::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
         a_frags, b_frags, acc_frags);
 
-    wt_tc_triple_buffer::load_from_smem<
+    wt_tc_two_level_pipeline::load_from_smem<
         BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K
     >(
         As[current ^ 1], Bs[current ^ 1],
@@ -210,13 +193,14 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_triple_buffering_gem
 
     __syncthreads();
 
-    wt_tc_triple_buffer::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
+    wt_tc_two_level_pipeline::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
         a_frags, b_frags, acc_frags);
 
+    // Stage 3: epilogue; output stores.
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
-            uint16_t const C_row_offset{static_cast<uint16_t>(warp_row_offset + wmma_row_idx * WMMA_M)};
-            uint16_t const C_col_offset{static_cast<uint16_t>(warp_col_offset + wmma_col_idx * WMMA_N)};
+            uint const C_row_offset{warp_row_offset + wmma_row_idx * WMMA_M};
+            uint const C_col_offset{warp_col_offset + wmma_col_idx * WMMA_N};
 
             nvcuda::wmma::load_matrix_sync(
                 c_frag,

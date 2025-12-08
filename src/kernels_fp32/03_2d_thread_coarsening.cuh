@@ -9,7 +9,10 @@
 template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK, uint const TM, uint const TN>
 __global__ void __launch_bounds__(NUM_THREADS) thread_coarsening_2d_gemm(
     int M, int N, int K, float alpha,
-    float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
+    float const *__restrict__ A,
+    float const *__restrict__ B,
+    float       beta,
+    float       *__restrict__ C
 ) {
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];

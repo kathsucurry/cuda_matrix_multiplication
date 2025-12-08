@@ -4,6 +4,7 @@
 #include <cuda_pipeline.h>
 #include <mma.h>
 
+#include "10_tensor_cores.cuh"
 #include "11_tensor_cores_memcpy_async.cuh"
 
 
@@ -19,30 +20,26 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
     __shared__ __nv_bfloat16 As[2][BM * BK];
     __shared__ __nv_bfloat16 Bs[2][BK * BN];
 
+    uint As_offset{}, Bs_offset{};
+
     constexpr uint NUM_WMMA_M{WM / WMMA_M};
     constexpr uint NUM_WMMA_N{WN / WMMA_N};
 
-    uint const warp_idx{threadIdx.x / 32};
-    uint const warp_row_offset{(warp_idx / (BN / WN)) * WM};
-    uint const warp_col_offset{(warp_idx % (BN / WN)) * WN};
-
     {
+        uint const warp_idx{threadIdx.x / 32};
+        uint const warp_row_offset{(warp_idx / (BN / WN)) * WM};
+        uint const warp_col_offset{(warp_idx % (BN / WN)) * WN};
+
         uint const block_row_offset{blockIdx.y * BM};
         uint const block_col_offset{blockIdx.x * BN};
 
         A += block_row_offset * K;
         B += block_col_offset;
-        C += block_row_offset * N + block_col_offset;
+        C += (block_row_offset + warp_row_offset) * N + (block_col_offset + warp_col_offset);
+
+        As_offset = warp_row_offset * BK;
+        Bs_offset = warp_col_offset;
     }
-
-    constexpr uint stride_A{(NUM_THREADS << 3) / BK};
-    constexpr uint stride_B{(NUM_THREADS << 3) / BN};
-
-    // For storing into shared memory.
-    uint const A_block_row_idx{threadIdx.x / (BK >> 3)};
-    uint const A_block_col_idx{(threadIdx.x % (BK >> 3)) << 3};
-    uint const B_block_row_idx{threadIdx.x / (BN >> 3)};
-    uint const B_block_col_idx{(threadIdx.x % (BN >> 3)) << 3};
 
     // Declare fragments.
     nvcuda::wmma::fragment<
@@ -51,8 +48,6 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
         nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> b_frag;
     nvcuda::wmma::fragment<
         nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frags[NUM_WMMA_M][NUM_WMMA_N];
-    nvcuda::wmma::fragment<
-        nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
     // Initialize the accumulator fragments.
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx)
@@ -61,31 +56,28 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
 
     int8_t current{0};
 
-    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
+    // Stage 1: shared-memory stores.
+    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
         A, B, N, K,
         As[current], Bs[current],
-        A_block_row_idx, A_block_col_idx,
-        B_block_row_idx, B_block_col_idx,
-        stride_A, stride_B
+        threadIdx.x
     );
 
     for (int k_offset{0}; k_offset < K - BK; k_offset += BK) {
         A += BK;
         B += BK * N;
 
-        wt_tc_memcpy_async::load_from_gmem<BM, BN, BK>(
+        wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As[current ^ 1], Bs[current ^ 1],
-            A_block_row_idx, A_block_col_idx,
-            B_block_row_idx, B_block_col_idx,
-            stride_A, stride_B
+            threadIdx.x
         );
         __pipeline_wait_prior(1);
         __syncthreads();
 
-        // Execute the dot product.
-        wt_tc_memcpy_async::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
-            As[current], Bs[current], a_frag, b_frag, acc_frags, warp_row_offset, warp_col_offset);
+        // Stage 2: dot-product computation.
+        wt_tc::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+            &As[current][As_offset], &Bs[current][Bs_offset], a_frag, b_frag, acc_frags);
         __syncthreads();
 
         current ^= 1;
@@ -93,28 +85,10 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_tc_memcpy_async::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
-            As[current], Bs[current], a_frag, b_frag, acc_frags, warp_row_offset, warp_col_offset);
+    wt_tc::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+        &As[current][As_offset], &Bs[current][Bs_offset], a_frag, b_frag, acc_frags);
 
-    for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
-        for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
-            uint const C_row_offset{warp_row_offset + wmma_row_idx * WMMA_M};
-            uint const C_col_offset{warp_col_offset + wmma_col_idx * WMMA_N};
-
-            nvcuda::wmma::load_matrix_sync(
-                c_frag,
-                &C[C_row_offset * N + C_col_offset],
-                N,
-                nvcuda::wmma::mem_row_major
-            );
-
-            for (int i{0}; i < c_frag.num_elements; ++i) {
-                c_frag.x[i] = alpha * acc_frags[wmma_row_idx][wmma_col_idx].x[i] + beta * c_frag.x[i];
-            }
-
-            nvcuda::wmma::store_matrix_sync(
-                &C[C_row_offset * N + C_col_offset], c_frag, N, nvcuda::wmma::mem_row_major
-            );
-        }
-    }
+    // Stage 3: epilogue; output stores.
+    wt_tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+        C, acc_frags, N, alpha, beta);
 }

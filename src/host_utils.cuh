@@ -62,22 +62,22 @@ bool verify_matrix(T *matrix_1, T *matrix_2, size_t N) {
 }
 
 
-template <typename T, typename U>
+template <typename T>
 void prepare_matrices(
     T     *&A,
     T     *&B,
-    U     *&C,
-    U     *&C_ref,
+    float *&C,
+    float *&C_ref,
     T     *&A_d,
     T     *&B_d,
-    U     *&C_d,
-    U     *&C_ref_d,
+    float *&C_d,
+    float *&C_ref_d,
     size_t matrix_size
 ) {
-    A     = (T *)malloc(sizeof(T) * matrix_size * matrix_size);
-    B     = (T *)malloc(sizeof(T) * matrix_size * matrix_size);
-    C     = (U *)malloc(sizeof(U) * matrix_size * matrix_size);
-    C_ref = (U *)malloc(sizeof(U) * matrix_size * matrix_size); 
+    A     = (T     *)malloc(sizeof(T) * matrix_size * matrix_size);
+    B     = (T     *)malloc(sizeof(T) * matrix_size * matrix_size);
+    C     = (float *)malloc(sizeof(float) * matrix_size * matrix_size);
+    C_ref = (float *)malloc(sizeof(float) * matrix_size * matrix_size); 
 
     randomize_matrix(A, matrix_size * matrix_size);
     randomize_matrix(B, matrix_size * matrix_size);
@@ -85,26 +85,26 @@ void prepare_matrices(
 
     CHECK_CUDA_ERROR(cudaMalloc((void **)&A_d, sizeof(T) * matrix_size * matrix_size));
     CHECK_CUDA_ERROR(cudaMalloc((void **)&B_d, sizeof(T) * matrix_size * matrix_size));
-    CHECK_CUDA_ERROR(cudaMalloc((void **)&C_d, sizeof(U) * matrix_size * matrix_size));
-    CHECK_CUDA_ERROR(cudaMalloc((void **)&C_ref_d, sizeof(U) * matrix_size * matrix_size));
+    CHECK_CUDA_ERROR(cudaMalloc((void **)&C_d, sizeof(float) * matrix_size * matrix_size));
+    CHECK_CUDA_ERROR(cudaMalloc((void **)&C_ref_d, sizeof(float) * matrix_size * matrix_size));
 
     CHECK_CUDA_ERROR(cudaMemcpy(A_d, A, sizeof(T) * matrix_size * matrix_size, cudaMemcpyHostToDevice));
     CHECK_CUDA_ERROR(cudaMemcpy(B_d, B, sizeof(T) * matrix_size * matrix_size, cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemcpy(C_d, C, sizeof(U) * matrix_size * matrix_size, cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemcpy(C_ref_d, C, sizeof(U) * matrix_size * matrix_size, cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(C_d, C, sizeof(float) * matrix_size * matrix_size, cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(C_ref_d, C, sizeof(float) * matrix_size * matrix_size, cudaMemcpyHostToDevice));
 }
 
 
-template <typename T, typename U>
+template <typename T>
 void free_matrices(
-    T *&A,
-    T *&B,
-    U *&C,
-    U *&C_ref,
-    T *&A_d,
-    T *&B_d,
-    U *&C_d,
-    U *&C_ref_d
+    T     *&A,
+    T     *&B,
+    float *&C,
+    float *&C_ref,
+    T     *&A_d,
+    T     *&B_d,
+    float *&C_d,
+    float *&C_ref_d
 ) {
     free(A);
     free(B);

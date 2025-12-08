@@ -22,7 +22,6 @@ __device__ void load_from_gmem(
             4 * sizeof(float)
         );
     }
-    __pipeline_commit();
         
     for (int B_load_offset{0}; B_load_offset < BK; B_load_offset += stride_B) {
         __pipeline_memcpy_async(
@@ -46,29 +45,37 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     __shared__ float As[2][BM * BK];
     __shared__ float Bs[2][BK * BN];
 
-    uint const lane_idx{threadIdx.x % 32};
-    uint const warp_idx{threadIdx.x / 32};
-    uint const warp_row_offset{(warp_idx / (BN / WN)) * WM};
-    uint const warp_col_offset{(warp_idx % (BN / WN)) * WN};
-
     constexpr uint WMITER{WM * WN / (32 * TM * TN * WNITER)};
     constexpr uint WSUBM{WM / WMITER};
     constexpr uint WSUBN{WN / WNITER};
-
-    uint const thread_col_in_warp{lane_idx % (WSUBN / TN)};
-    uint const thread_row_in_warp{lane_idx / (WSUBN / TN)};
 
     float out_values[WMITER * TM * WNITER * TN] = {0.0f};
     float reg_M[WMITER * TM] = {0.0f};
     float reg_N[WNITER * TN] = {0.0f};
 
+    // Offset As and Bs given warp and thread indices.
+    uint As_offset{}, Bs_offset{};
+
     {
+        uint const lane_idx{threadIdx.x % 32};
+        uint const warp_idx{threadIdx.x / 32};
+        uint const warp_row_offset{(warp_idx / (BN / WN)) * WM};
+        uint const warp_col_offset{(warp_idx % (BN / WN)) * WN};
+
+        uint const thread_col_in_warp{lane_idx % (WSUBN / TN)};
+        uint const thread_row_in_warp{lane_idx / (WSUBN / TN)};
+
         uint const block_row_offset{blockIdx.y * BM};
         uint const block_col_offset{blockIdx.x * BN};
 
         A += block_row_offset * K;
         B += block_col_offset;
-        C += block_row_offset * N + block_col_offset;
+        // We only need C during the epilogue, which is warp and thread-specific.
+        C += (block_row_offset + warp_row_offset + thread_row_in_warp * TM) * N +
+             (block_col_offset + warp_col_offset + thread_col_in_warp * TN);
+
+        As_offset = (warp_row_offset + thread_row_in_warp * TM) * BK;
+        Bs_offset = warp_col_offset + thread_col_in_warp * TN;
     }
 
     constexpr uint stride_A{(NUM_THREADS << 2) / BK};
@@ -82,6 +89,7 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
 
     int current{0};
 
+    // Stage 1: shared-memory stores.
     wt_memcpy_async::load_from_gmem<BM, BN, BK>(
         A, B, N, K,
         As[current], Bs[current],
@@ -89,13 +97,12 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
         B_block_row_idx, B_block_col_idx,
         stride_A, stride_B
     );
-    __pipeline_wait_prior(0);
-    __syncthreads();
 
     for (int k_offset{0}; k_offset < K - BK; k_offset += BK) {
         A += BK;
         B += BK * N;
 
+        // Stage 1: shared-memory stores.
         wt_memcpy_async::load_from_gmem<BM, BN, BK>(
             A, B, N, K,
             As[current ^ 1], Bs[current ^ 1],
@@ -103,13 +110,12 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
             B_block_row_idx, B_block_col_idx,
             stride_A, stride_B
         );
-        __pipeline_wait_prior(BM / stride_A + BK / stride_B);
+        __pipeline_wait_prior(1);
         __syncthreads();
 
-        // Execute the dot product.
-        wt_sd::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
-            As[current], Bs[current], reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
-            thread_row_in_warp, thread_col_in_warp
+        // Stage 2: dot-product computation.
+        wt_sd::compute_gemm<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+            &As[current][As_offset], &Bs[current][Bs_offset], reg_M, reg_N, out_values
         );
         __syncthreads();
 
@@ -118,33 +124,13 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_sd::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
-        As[current], Bs[current], reg_M, reg_N, out_values, warp_row_offset, warp_col_offset,
-        thread_row_in_warp, thread_col_in_warp
+    wt_sd::compute_gemm<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        &As[current][As_offset], &Bs[current][Bs_offset], reg_M, reg_N, out_values
     );
-    __syncthreads();
 
-    for (int wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx)
-        for (int wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx) {
-            uint const tile_row_idx{warp_row_offset + wmiter_idx * WSUBM + thread_row_in_warp * TM};
-            uint const tile_col_idx{warp_col_offset + wniter_idx * WSUBN + thread_col_in_warp * TN};
-            
-            for (int tm_idx{0}; tm_idx < TM; ++tm_idx)
-                for (int tn_idx{0}; tn_idx < TN; tn_idx += 4) {
-                    uint const cell_row_idx{tile_row_idx + tm_idx};
-                    uint const cell_col_idx{tile_col_idx + tn_idx};
-                    
-                    float4 tmp = reinterpret_cast<float4 *>(
-                        &C[cell_row_idx * N + cell_col_idx]
-                        )[0];
-                    uint const first_out_idx = (wmiter_idx * TM + tm_idx) * (WNITER * TN) + wniter_idx * TN + tn_idx;
-                    tmp.x = alpha * out_values[first_out_idx + 0] + beta * tmp.x;
-                    tmp.y = alpha * out_values[first_out_idx + 1] + beta * tmp.y;
-                    tmp.z = alpha * out_values[first_out_idx + 2] + beta * tmp.z;
-                    tmp.w = alpha * out_values[first_out_idx + 3] + beta * tmp.w;
-                    reinterpret_cast<float4 *>(
-                        &C[cell_row_idx * N + cell_col_idx]
-                    )[0] = tmp;
-                }
-        }       
+    // Stage 3: epilogue; output stores.
+    wt_sd::run_epilogue<WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        C, out_values, N,
+        alpha, beta
+    );    
 }

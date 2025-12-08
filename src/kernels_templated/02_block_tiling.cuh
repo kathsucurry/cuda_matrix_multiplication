@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../traits.cuh"
+
 
 /**
  * Corresponds to kernel 3: shared memory cache - blocking in Simon's post.
@@ -7,13 +9,18 @@
  * For each block, allocate 2 * block size number of cells of shared memory. For
  * instance, if the block size is 32 x 32, then the total allocated shared memory is 2 x 32 x 32.
  */
-template <uint const BLOCK_DIM>
+template <typename T, uint const BLOCK_DIM>
 __global__ void __launch_bounds__(BLOCK_DIM * BLOCK_DIM) block_tiling_gemm(
     int M, int N, int K, float alpha,
-    float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
+    T const *__restrict__ A,
+    T const *__restrict__ B,
+    float   beta,
+    float   *__restrict__ C
 ) {
-    __shared__ float As[BLOCK_DIM * BLOCK_DIM];
-    __shared__ float Bs[BLOCK_DIM * BLOCK_DIM];
+    using traits = float_traits<T>;
+
+    __shared__ T As[BLOCK_DIM * BLOCK_DIM];
+    __shared__ T Bs[BLOCK_DIM * BLOCK_DIM];
 
     {
         uint const block_row_offset{blockIdx.y * BLOCK_DIM};
@@ -27,6 +34,7 @@ __global__ void __launch_bounds__(BLOCK_DIM * BLOCK_DIM) block_tiling_gemm(
     float sum{0.0f};
 
     for (int k_offset{0}; k_offset < K; k_offset += BLOCK_DIM) {
+        // Stage 1: shared-memory stores.
         As[threadIdx.y * BLOCK_DIM + threadIdx.x] = A[threadIdx.y * K + threadIdx.x];
         Bs[threadIdx.y * BLOCK_DIM + threadIdx.x] = B[threadIdx.y * N + threadIdx.x];
         __syncthreads();
@@ -34,12 +42,14 @@ __global__ void __launch_bounds__(BLOCK_DIM * BLOCK_DIM) block_tiling_gemm(
         A += BLOCK_DIM;
         B += BLOCK_DIM * N;
 
-        // Execute the dot product; recall that BLOCK_DIM and BLOCK_DIM are the same here.
+        // Stage 2: dot-product computation.
         for (int dot_idx{0}; dot_idx < BLOCK_DIM; ++dot_idx) {
-            sum += As[threadIdx.y * BLOCK_DIM + dot_idx] * Bs[dot_idx * BLOCK_DIM + threadIdx.x];
+            sum += traits::to_compute(As[threadIdx.y * BLOCK_DIM + dot_idx]) *
+                   traits::to_compute(Bs[dot_idx * BLOCK_DIM + threadIdx.x]);
         }
         __syncthreads();
     }
 
+    // Stage 3: epilogue; output stores.
     C[threadIdx.y * N + threadIdx.x] = alpha * sum + beta * C[threadIdx.y * N + threadIdx.x];
 }

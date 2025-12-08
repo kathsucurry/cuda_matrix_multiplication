@@ -3,6 +3,7 @@
 #include <cuda_bf16.h>
 #include <mma.h>
 
+#include "../kernels_fp32/04_vectorize.cuh"
 #include "10_tensor_cores.cuh"
 
 
@@ -33,15 +34,6 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
         C += block_row_offset * N + block_col_offset;
     }
 
-    constexpr uint stride_A{(NUM_THREADS << 3) / BK};
-    constexpr uint stride_B{(NUM_THREADS << 3) / BN};
-
-    // For storing into shared memory.
-    uint const A_block_row_idx{threadIdx.x / (BK >> 3)};
-    uint const A_block_col_idx{(threadIdx.x % (BK >> 3)) << 3};
-    uint const B_block_row_idx{threadIdx.x / (BN >> 3)};
-    uint const B_block_col_idx{(threadIdx.x % (BN >> 3)) << 3};
-
     // Define the matrix fragment size here since the implementation (e.g., fragment
     // layout) depends on the size.
     constexpr uint MMA_M{16};
@@ -62,12 +54,11 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
     float acc_register[NUM_MMA_M][NUM_MMA_N][4] = {0.0f};
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
-        wt_tc::load_from_gmem<BM, BN, BK>(
+        // Stage 1: shared-memory stores.
+        vectorize::load_from_gmem<__nv_bfloat16, BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As, Bs,
-            A_block_row_idx, A_block_col_idx,
-            B_block_row_idx, B_block_col_idx,
-            stride_A, stride_B
+            threadIdx.x
         );
         __syncthreads();
 
