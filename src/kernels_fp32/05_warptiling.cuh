@@ -1,6 +1,6 @@
 #pragma once
 
-#include "04_vectorize.cuh"
+#include "../kernels_templated/04_vectorize.cuh"
 #include "../traits.cuh"
 
 
@@ -102,7 +102,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        vectorize::load_from_gmem<float, BM, BN, BK, NUM_THREADS, 2>(
+        vectorize::load_from_gmem<float, BM, BN, BK, NUM_THREADS>(
             A, B, N, K,
             As, Bs,
             threadIdx.x

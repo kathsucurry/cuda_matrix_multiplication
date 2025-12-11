@@ -62,48 +62,6 @@ void run_2d_thread_coarsening(int M, int N, int K, float alpha, float *A, float 
 }
 
 
-void run_vectorize(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
-    constexpr uint BLOCK_DIM{128};
-    // BM: the size of block vertically; BN: the size of block horizontally. 
-    constexpr uint BM{BLOCK_DIM}, BN{BLOCK_DIM};
-    // TM, TN: the number of rows, columns processed by each thread, respectively.
-    constexpr uint TM{16}, TN{8};
-
-    constexpr uint BK{32};
-    // Updated requirement given that we use float4 for vectorizing.
-    static_assert(((BK * BM) % (4 * BLOCK_DIM) == 0) && ((BK * BN) % (4 * BLOCK_DIM) == 0));
-
-    static_assert(BK % 4 == 0);
-    static_assert((TM % 4 == 0) && (TN % 4 == 0));
-
-    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
-    dim3 block_dim(BM * BN / (TM * TN));
-    vectorize_gemm<BM * BN / (TM * TN), BM, BN, BK, TM, TN>
-        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
-}
-
-
-void run_vectorize(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C) {
-    constexpr uint BLOCK_DIM{128};
-    // BM: the size of block vertically; BN: the size of block horizontally. 
-    constexpr uint BM{BLOCK_DIM}, BN{BLOCK_DIM};
-    // TM, TN: the number of rows, columns processed by each thread, respectively.
-    constexpr uint TM{16}, TN{8};
-
-    constexpr uint BK{32};
-    // Updated requirement given that we use float4 for vectorizing.
-    static_assert(((BK * BM) % (2 * BLOCK_DIM) == 0) && ((BK * BN) % (2 * BLOCK_DIM) == 0));
-
-    static_assert(BK % 2 == 0);
-    static_assert((TM % 2 == 0) && (TN % 2 == 0));
-
-    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
-    dim3 block_dim(BM * BN / (TM * TN));
-    vectorize_gemm<BM * BN / (TM * TN), BM, BN, BK, TM, TN>
-        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
-}
-
-
 void run_warptiling(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
     // The overall method can be separated into two steps:
     // 1) Loading data from global memory to shared memory --> similar to the previous kernel.

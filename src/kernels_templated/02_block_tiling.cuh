@@ -26,6 +26,7 @@ __global__ void __launch_bounds__(BLOCK_DIM * BLOCK_DIM) block_tiling_gemm(
         uint const block_row_offset{blockIdx.y * BLOCK_DIM};
         uint const block_col_offset{blockIdx.x * BLOCK_DIM};
 
+        // Shift A, B, and C with the block offsets.
         A += block_row_offset * K;
         B += block_col_offset;
         C += block_row_offset * N + block_col_offset;

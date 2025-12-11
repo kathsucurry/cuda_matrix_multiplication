@@ -46,6 +46,28 @@ void run_sharedmem_block_tiling(int M, int N, int K, float alpha, T *A, T *B, fl
 
 
 template <typename T>
+void run_vectorize(int M, int N, int K, float alpha, T *A, T *B, float beta, float *C) {
+    constexpr uint BLOCK_DIM{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    constexpr uint BM{BLOCK_DIM}, BN{BLOCK_DIM};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    constexpr uint TM{16}, TN{8};
+
+    constexpr uint BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    static_assert(((BK * BM) % (4 * BLOCK_DIM) == 0) && ((BK * BN) % (4 * BLOCK_DIM) == 0));
+
+    static_assert(BK % 4 == 0);
+    static_assert((TM % 4 == 0) && (TN % 4 == 0));
+
+    dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
+    dim3 block_dim(BM * BN / (TM * TN));
+    vectorize_gemm<T, BM * BN / (TM * TN), BM, BN, BK, TM, TN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+template <typename T>
 void measure_performance(
     std::vector<uint> const MATRIX_SIZE,
     cublasHandle_t cublas_handle,
