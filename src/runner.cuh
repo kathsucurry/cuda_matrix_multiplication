@@ -63,6 +63,36 @@ void run_vectorize(int M, int N, int K, float alpha, T *A, T *B, float beta, flo
     dim3 grid_dim(CEIL_DIV(N, BLOCK_DIM), CEIL_DIV(M, BLOCK_DIM));
     dim3 block_dim(BM * BN / (TM * TN));
     vectorize_gemm<T, BM * BN / (TM * TN), BM, BN, BK, TM, TN>
+    <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
+template <typename T>
+void run_warptiling(int M, int N, int K, float alpha, T *A, T *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    
+    constexpr uint NUM_THREADS{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    constexpr uint BM{128}, BN{128};
+    // TM, TN: the number of rows, columns processed by each thread, respectively.
+    constexpr uint TM{16}, TN{8};
+    constexpr uint BK{32};
+    // Updated requirement given that we use float4 for vectorizing.
+    constexpr uint FACTOR{4 * sizeof(float) / sizeof(T)};
+    static_assert(((BK * BM) % (FACTOR * NUM_THREADS) == 0) && ((BK * BN) % (FACTOR * NUM_THREADS) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    constexpr uint WM{32}, WN{128};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
+
+    static_assert(WM * WN / 32 == TM * TN);
+
+    dim3 block_dim(NUM_THREADS);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    warptiling_gemm<T, NUM_THREADS, BM, BN, BK, WM, WN, TM, TN>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
