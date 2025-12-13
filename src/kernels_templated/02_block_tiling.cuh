@@ -51,6 +51,6 @@ __global__ void __launch_bounds__(BLOCK_DIM * BLOCK_DIM) block_tiling_gemm(
         __syncthreads();
     }
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     C[threadIdx.y * N + threadIdx.x] = alpha * sum + beta * C[threadIdx.y * N + threadIdx.x];
 }

@@ -49,7 +49,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        vectorize::load_from_gmem<T, BM, BN, BK, NUM_THREADS>(
+        vectorize::load_gmem_to_smem<T, BM, BN, BK, NUM_THREADS>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
@@ -60,12 +60,12 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_gemm(
         B += BK * N;
 
         // Stage 2: dot-product computation.
-        vectorize::compute_gemm<T, BN, BK, TM, TN>(
+        vectorize::compute_dot_products<T, BN, BK, TM, TN>(
             As_warp, Bs_warp, reg_M, reg_N, out_values
         );
         __syncthreads();
     }
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     vectorize::run_epilogue<TM, TN>(C, out_values, N, alpha, beta);
 }

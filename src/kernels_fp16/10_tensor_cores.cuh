@@ -9,7 +9,7 @@
 namespace wt_tc {
     
 template <uint const BM, uint const BN, uint const BK>
-__device__ void load_from_gmem(
+__device__ void load_gmem_to_smem(
     __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, int N, int K,
     __nv_bfloat16 *__restrict__ As, __nv_bfloat16 *__restrict__ Bs,
     uint const A_block_row_idx, uint const A_block_col_idx,
@@ -31,7 +31,7 @@ __device__ void load_from_gmem(
 template <uint const BN, uint const BK,
           uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,
           uint const NUM_WMMA_M, uint const NUM_WMMA_N>
-__device__ __forceinline__ void compute_gemm(
+__device__ __forceinline__ void compute_dot_products(
     __nv_bfloat16 *__restrict__ As,
     __nv_bfloat16 *__restrict__ Bs,
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frag,
@@ -150,7 +150,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        vectorize::load_from_gmem<__nv_bfloat16, BM, BN, BK, NUM_THREADS>(
+        vectorize::load_gmem_to_smem<__nv_bfloat16, BM, BN, BK, NUM_THREADS>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
@@ -161,12 +161,12 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
         B += BK * N;
 
         // Stage 2: dot-product computation.
-        wt_tc::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+        wt_tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
             As_warp, Bs_warp, a_frag, b_frag, acc_frags);
         __syncthreads();
     }
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     wt_tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
         C, acc_frags, N, alpha, beta);
 }

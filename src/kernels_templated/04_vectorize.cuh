@@ -7,7 +7,7 @@
 namespace vectorize {
     
 template <typename T, uint const BM, uint const BN, uint const BK, const uint NUM_THREADS>
-__device__ void load_from_gmem(
+__device__ void load_gmem_to_smem(
     T *__restrict__ A, T *__restrict__ B, int N, int K,
     T *__restrict__ As, T *__restrict__ Bs,
     uint const thread_idx
@@ -34,7 +34,7 @@ __device__ void load_from_gmem(
 
 
 template <typename T, uint const BN, uint const BK, uint const TM, uint const TN>
-__device__ void compute_gemm(
+__device__ void compute_dot_products(
     T const *__restrict__ As,
     T const *__restrict__ Bs,
     float   *__restrict__ reg_M,
@@ -131,7 +131,7 @@ __global__ void __launch_bounds__(NUM_THREADS) vectorize_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        vectorize::load_from_gmem<T, BM, BN, BK, NUM_THREADS>(
+        vectorize::load_gmem_to_smem<T, BM, BN, BK, NUM_THREADS>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
@@ -142,10 +142,10 @@ __global__ void __launch_bounds__(NUM_THREADS) vectorize_gemm(
         B += BK * N;
 
         // Stage 2: dot-product computation.
-        vectorize::compute_gemm<T, BN, BK, TM, TN>(As_warp, Bs_warp, reg_M, reg_N, out_values);
+        vectorize::compute_dot_products<T, BN, BK, TM, TN>(As_warp, Bs_warp, reg_M, reg_N, out_values);
         __syncthreads();
     }
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     vectorize::run_epilogue<TM, TN>(C, out_values, N, alpha, beta);
 }

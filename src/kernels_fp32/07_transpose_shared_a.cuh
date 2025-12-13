@@ -6,7 +6,7 @@
 namespace wt_transposed_As {
 
 template <uint const BM, uint const BN, uint const BK, uint const NUM_THREADS, uint const FACTOR>
-__device__ void load_from_gmem(
+__device__ void load_gmem_to_smem(
     float *__restrict__ A, float *__restrict__ B, int K, int N,
     float *__restrict__ As, float *__restrict__ Bs,
     uint const thread_idx
@@ -41,7 +41,7 @@ template <uint const BM, uint const BN, uint const BK,
             uint const WMITER, uint const WNITER,
             uint const WSUBM, uint const WSUBN, 
             uint const TM, uint const TN>
-__device__ void compute_gemm(
+__device__ void compute_dot_products(
     float *__restrict__ As, float *__restrict__ Bs,
     float *__restrict__ reg_M, float *__restrict__ reg_N, float *__restrict__ out_values
 ) {
@@ -118,7 +118,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_transposed_a_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        wt_transposed_As::load_from_gmem<BM, BN, BK, NUM_THREADS, 2>(
+        wt_transposed_As::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 2>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
@@ -129,13 +129,13 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_transposed_a_gemm(
         B += BK * N;
 
         // Stage 2: dot-product computation.
-        wt_transposed_As::compute_gemm<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        wt_transposed_As::compute_dot_products<BM, BN, BK, WM, WN, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
             As_warp, Bs_warp, reg_M, reg_N, out_values
         );
         __syncthreads();
     }
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     wt_sd::run_epilogue<WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
         C, out_values, N, alpha, beta
     );     

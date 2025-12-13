@@ -8,7 +8,7 @@
 namespace wt_memcpy_async {
     
 template <uint const BM, uint const BN, uint const BK>
-__device__ void load_from_gmem(
+__device__ void load_gmem_to_smem(
     float *__restrict__ A, float *__restrict__ B, int N, int K,
     float *__restrict__ As, float *__restrict__ Bs,
     uint A_block_row_idx, uint A_block_col_idx,
@@ -90,7 +90,7 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     int current{0};
 
     // Stage 1: shared-memory stores.
-    wt_memcpy_async::load_from_gmem<BM, BN, BK>(
+    wt_memcpy_async::load_gmem_to_smem<BM, BN, BK>(
         A, B, N, K,
         As[current], Bs[current],
         A_block_row_idx, A_block_col_idx,
@@ -103,7 +103,7 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
         B += BK * N;
 
         // Stage 1: shared-memory stores.
-        wt_memcpy_async::load_from_gmem<BM, BN, BK>(
+        wt_memcpy_async::load_gmem_to_smem<BM, BN, BK>(
             A, B, N, K,
             As[current ^ 1], Bs[current ^ 1],
             A_block_row_idx, A_block_col_idx,
@@ -114,7 +114,7 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
         __syncthreads();
 
         // Stage 2: dot-product computation.
-        wt_sd::compute_gemm<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        wt_sd::compute_dot_products<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
             &As[current][As_offset], &Bs[current][Bs_offset], reg_M, reg_N, out_values
         );
         __syncthreads();
@@ -124,11 +124,11 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_sd::compute_gemm<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+    wt_sd::compute_dot_products<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
         &As[current][As_offset], &Bs[current][Bs_offset], reg_M, reg_N, out_values
     );
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     wt_sd::run_epilogue<WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
         C, out_values, N,
         alpha, beta

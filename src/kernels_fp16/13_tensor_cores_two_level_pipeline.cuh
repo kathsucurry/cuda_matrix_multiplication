@@ -49,7 +49,7 @@ __device__ __forceinline__ void load_from_smem(
 template <uint const BN, uint const BK,
       uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,
       uint const NUM_WMMA_M, uint const NUM_WMMA_N, uint const NUM_WMMA_K>
-__device__ __forceinline__ void compute_gemm(
+__device__ __forceinline__ void compute_dot_products(
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frags[NUM_WMMA_M][NUM_WMMA_K],
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> b_frags[NUM_WMMA_K][NUM_WMMA_N],
     nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frags[NUM_WMMA_M][NUM_WMMA_N]
@@ -118,7 +118,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_two_level_pipeline_g
             nvcuda::wmma::fill_fragment(acc_frags[wmma_row_idx][wmma_col_idx], 0.0f);
 
     // Stage 1: shared-memory stores.
-    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
+    wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
         A, B, N, K,
         As[0], Bs[0],
         threadIdx.x
@@ -127,7 +127,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_two_level_pipeline_g
     A += BK;
     B += BK * N;
 
-    wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
+    wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
         A, B, N, K,
         As[1], Bs[1],
         threadIdx.x
@@ -153,14 +153,14 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_two_level_pipeline_g
         __syncthreads();
 
         // Load from gmem to smem, replacing the current smem.
-        wt_tc_memcpy_async::load_from_gmem<BM, BN, BK, NUM_THREADS, 3>(
+        wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As[current], Bs[current],
             threadIdx.x
         );
 
         // Execute the dot product.
-        wt_tc_two_level_pipeline::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
+        wt_tc_two_level_pipeline::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
             a_frags, b_frags, acc_frags);
 
         // Load from smem to registers.
@@ -180,7 +180,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_two_level_pipeline_g
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_tc_two_level_pipeline::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
+    wt_tc_two_level_pipeline::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
         a_frags, b_frags, acc_frags);
 
     wt_tc_two_level_pipeline::load_from_smem<
@@ -193,10 +193,10 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_two_level_pipeline_g
 
     __syncthreads();
 
-    wt_tc_two_level_pipeline::compute_gemm<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
+    wt_tc_two_level_pipeline::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N, NUM_WMMA_K>(
         a_frags, b_frags, acc_frags);
 
-    // Stage 3: epilogue; output stores.
+    // Stage 3: epilogue + output stores.
     for (int wmma_row_idx{0}; wmma_row_idx < NUM_WMMA_M; ++wmma_row_idx) {
         for (int wmma_col_idx{0}; wmma_col_idx < NUM_WMMA_N; ++wmma_col_idx) {
             uint const C_row_offset{warp_row_offset + wmma_row_idx * WMMA_M};
