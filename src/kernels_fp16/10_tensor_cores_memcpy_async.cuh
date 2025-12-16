@@ -77,7 +77,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_memcpy_async_gemm(
         Bs_warp = &Bs[warp_col_offset];
     }
 
-    // Declare fragments.
+    // Create fragments.
     nvcuda::wmma::fragment<
         nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __nv_bfloat16, nvcuda::wmma::row_major> a_frag;
     nvcuda::wmma::fragment<

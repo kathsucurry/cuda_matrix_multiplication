@@ -245,7 +245,7 @@ void run_tensor_cores_two_level_pipeline(int M, int N, int K, float alpha, __nv_
 
     dim3 block_dim(NUM_THREADS);
     dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
-    tensor_cores_two_level_pipeline_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WMMA_M, WMMA_N, WMMA_K>
+    tensor_cores_three_level_pipeline_gemm<NUM_THREADS, BM, BN, BK, WM, WN, WMMA_M, WMMA_N, WMMA_K>
         <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
 }
 
