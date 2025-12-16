@@ -1,6 +1,6 @@
 #pragma once
 
-#include "06_warptiling_subdivided.cuh"
+#include "../kernels_templated/06_warptiling_subdivided.cuh"
 
 
 namespace wt_transposed_As {

@@ -2,7 +2,7 @@
 
 #include <cuda_pipeline.h>
 
-#include "06_warptiling_subdivided.cuh"
+#include "../kernels_templated/06_warptiling_subdivided.cuh"
 
 
 namespace wt_memcpy_async {
@@ -114,7 +114,7 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
         __syncthreads();
 
         // Stage 2: dot-product computation.
-        wt_sd::compute_dot_products<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        wt_sd::compute_dot_products<float, BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
             &As[current][As_offset], &Bs[current][Bs_offset], reg_M, reg_N, out_values
         );
         __syncthreads();
@@ -124,7 +124,7 @@ __global__ void __launch_bounds__(NUM_THREADS) double_buffering_gemm(
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_sd::compute_dot_products<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+    wt_sd::compute_dot_products<float, BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
         &As[current][As_offset], &Bs[current][Bs_offset], reg_M, reg_N, out_values
     );
 

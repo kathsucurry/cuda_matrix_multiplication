@@ -1,34 +1,36 @@
 #pragma once
 
+#include "../traits.cuh"
 #include "../kernels_templated/04_vectorize.cuh"
 
 
 namespace wt_sd {
     
-template <uint const BN, uint const BK,
+template <typename T,
+          uint const BN, uint const BK,
           uint const WMITER, uint const WNITER,
           uint const WSUBM, uint const WSUBN, 
           uint const TM, uint const TN>
 __device__ void compute_dot_products(
-    float *__restrict__ As, float *__restrict__ Bs,
+    T *__restrict__ As, T *__restrict__ Bs,
     float *__restrict__ reg_M, float *__restrict__ reg_N, float *__restrict__ out_values
 ) {
+    using traits = float_traits<T>;
+
     // Recall that reg_M has a size of WMITER * TM and
     // reg_N has a size of WNITER * TN.
     for (int k{0}; k < BK; ++k) {
         for (int wmiter_idx{0}; wmiter_idx < WMITER; ++wmiter_idx) {
             for (int tm_idx{0}; tm_idx < TM; ++tm_idx) {
-                reg_M[wmiter_idx * TM + tm_idx] = As[
-                    (wmiter_idx * WSUBM + tm_idx) * BK + k
-                ];
+                reg_M[wmiter_idx * TM + tm_idx] = traits::to_compute(
+                    As[(wmiter_idx * WSUBM + tm_idx) * BK + k]);
             }
         }
 
         for (int wniter_idx{0}; wniter_idx < WNITER; ++wniter_idx) {
             for (int tn_idx{0}; tn_idx < TN; ++tn_idx) {
-                reg_N[wniter_idx * TN + tn_idx] = Bs[
-                    k * BN + (wniter_idx * WSUBN + tn_idx)
-                ];
+                reg_N[wniter_idx * TN + tn_idx] = traits::to_compute(
+                    Bs[k * BN + (wniter_idx * WSUBN + tn_idx)]);
             }
         }
 
@@ -83,14 +85,14 @@ __device__ void run_epilogue(
 /**
  * Corresponds to kernel 10: warptiling.
  */
-template <uint const NUM_THREADS, uint const BM, uint const BN, uint const BK,
+template <typename T, uint const NUM_THREADS, uint const BM, uint const BN, uint const BK,
     uint const WM, uint const WN, uint const WNITER, uint const TM, uint const TN>
 __global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
     int M, int N, int K, float alpha,
-    float *__restrict__ A, float *__restrict__ B, float beta, float *__restrict__ C
+    T *__restrict__ A, T *__restrict__ B, float beta, float *__restrict__ C
 ) {
-    __shared__ float As[BM * BK];
-    __shared__ float Bs[BK * BN];
+    __shared__ T As[BM * BK];
+    __shared__ T Bs[BK * BN];
 
     constexpr uint WMITER{WM * WN / (32 * TM * TN * WNITER)};
     constexpr uint WSUBM{WM / WMITER};
@@ -100,7 +102,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
     float reg_M[WMITER * TM] = {0.0f};
     float reg_N[WNITER * TN] = {0.0f};
 
-    float *As_warp{nullptr}, *Bs_warp{nullptr};
+    T *As_warp{nullptr}, *Bs_warp{nullptr};
 
     {
         uint const lane_idx{threadIdx.x % 32};
@@ -126,7 +128,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        vectorize::load_gmem_to_smem<float, BM, BN, BK, NUM_THREADS>(
+        vectorize::load_gmem_to_smem<T, BM, BN, BK, NUM_THREADS>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
@@ -137,7 +139,7 @@ __global__ void __launch_bounds__(NUM_THREADS) warptiling_subdivided_gemm(
         B += BK * N;
 
         // Stage 2: dot-product computation.
-        wt_sd::compute_dot_products<BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
+        wt_sd::compute_dot_products<T, BN, BK, WMITER, WNITER, WSUBM, WSUBN, TM, TN>(
             As_warp, Bs_warp, reg_M, reg_N, out_values
         );
         __syncthreads();
