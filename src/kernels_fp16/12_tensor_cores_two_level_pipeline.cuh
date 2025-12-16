@@ -4,7 +4,7 @@
 #include <cuda_pipeline.h>
 #include <mma.h>
 
-#include "11_tensor_cores_memcpy_async.cuh"
+#include "10_tensor_cores_memcpy_async.cuh"
 
 
 namespace wt_tc_two_level_pipeline {

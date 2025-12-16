@@ -7,26 +7,6 @@
 
 
 namespace wt_tc {
-    
-template <uint const BM, uint const BN, uint const BK>
-__device__ void load_gmem_to_smem(
-    __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, int N, int K,
-    __nv_bfloat16 *__restrict__ As, __nv_bfloat16 *__restrict__ Bs,
-    uint const A_block_row_idx, uint const A_block_col_idx,
-    uint const B_block_row_idx, uint const B_block_col_idx,
-    uint const stride_A, uint const stride_B
-) {
-    for (int A_load_offset{0}; A_load_offset < BM; A_load_offset += stride_A) {
-        reinterpret_cast<float4 *>(&As[(A_block_row_idx + A_load_offset) * BK + A_block_col_idx])[0] =
-            reinterpret_cast<float4 *>(&A[(A_block_row_idx + A_load_offset) * K + A_block_col_idx])[0];
-    }
-        
-    for (int B_load_offset{0}; B_load_offset < BK; B_load_offset += stride_B) {
-        reinterpret_cast<float4 *>(&Bs[(B_block_row_idx + B_load_offset) * BN + B_block_col_idx])[0] =
-            reinterpret_cast<float4 *>(&B[(B_block_row_idx + B_load_offset) * N + B_block_col_idx])[0];
-    }
-}
-
 
 template <uint const BN, uint const BK,
           uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,

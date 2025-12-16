@@ -14,8 +14,8 @@
 #include "kernels_fp32/07_transpose_shared_a.cuh"
 #include "kernels_fp32/08_double_buffering.cuh"
 
-#include "kernels_fp16/10_tensor_cores.cuh"
-#include "kernels_fp16/11_tensor_cores_memcpy_async.cuh"
-#include "kernels_fp16/12_tensor_cores_double_buffering.cuh"
-#include "kernels_fp16/13_tensor_cores_two_level_pipeline.cuh"
-#include "kernels_fp16/14_tensor_cores_mma.cuh"
+#include "kernels_fp16/9_tensor_cores.cuh"
+#include "kernels_fp16/10_tensor_cores_memcpy_async.cuh"
+#include "kernels_fp16/11_tensor_cores_double_buffering.cuh"
+#include "kernels_fp16/12_tensor_cores_two_level_pipeline.cuh"
+#include "kernels_fp16/13_tensor_cores_mma.cuh"

@@ -367,19 +367,19 @@ void run_kernel(
     case 5:
         run_warptiling(M, N, K, alpha, A, B, beta, C);
         break;
-    case 10:
+    case 9:
         run_tensor_cores(M, N, K, alpha, A, B, beta, C);
         break;
-    case 11:
+    case 10:
         run_tensor_cores_memcpy_async(M, N, K, alpha, A, B, beta, C);
         break;
-    case 12:
+    case 11:
         run_tensor_cores_double_buffering(M, N, K, alpha, A, B, beta, C);
         break;
-    case 13:
+    case 12:
         run_tensor_cores_two_level_pipeline(M, N, K, alpha, A, B, beta, C);
         break;
-    case 14:
+    case 13:
         run_tensor_cores_mma(M, N, K, alpha, A, B, beta, C);
         break;
     default:

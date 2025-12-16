@@ -4,7 +4,7 @@
 #include <mma.h>
 
 #include "../kernels_templated/04_vectorize.cuh"
-#include "10_tensor_cores.cuh"
+#include "9_tensor_cores.cuh"
 
 
 template <uint const NUM_THREADS,
