@@ -210,7 +210,7 @@ void measure_performance(
         fflush(stdout);
 
         // Make C_d and C_ref_d equal to prepare for another iteration.
-        CHECK_CUDA_ERROR(cudaMemcpy(C_d, C_ref_d, sizeof(T) * M * N, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA_ERROR(cudaMemcpy(C_d, C_ref_d, sizeof(float) * M * N, cudaMemcpyDeviceToDevice));
     }
 
     CHECK_CUDA_ERROR(cudaEventDestroy(start));

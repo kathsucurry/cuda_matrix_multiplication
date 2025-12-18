@@ -274,6 +274,30 @@ void run_tensor_cores_mma(int M, int N, int K, float alpha, __nv_bfloat16 *A, __
 }
 
 
+void run_tensor_cores_mma_three_level_pipeline(int M, int N, int K, float alpha, __nv_bfloat16 *A, __nv_bfloat16 *B, float beta, float *C) {
+    // The overall method can be separated into two steps:
+    // 1) Loading data from global memory to shared memory --> similar to the previous kernel.
+    // 2) Compute the dot product between elements --> where warptiling is implemented.
+    constexpr uint NUM_THREADS{128};
+    // BM: the size of block vertically; BN: the size of block horizontally. 
+    constexpr uint BM{128}, BN{64};
+    constexpr uint BK{16};
+
+    // Updated requirement given that we use float4 for vectorizing the load.
+    static_assert(((BK * BM) % (2 * NUM_THREADS) == 0) && ((BK * BN) % (2 * NUM_THREADS) == 0));
+    
+    // WM, WN: the number of cell  rows, columns processed by each warp, respectively.
+    constexpr uint WM{64}, WN{32};
+    static_assert((BN % WN == 0) && (BM % WM == 0));
+    static_assert((BN / WN) * (BM / WM) == NUM_THREADS / 32);
+
+    dim3 block_dim(NUM_THREADS);
+    dim3 grid_dim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
+    tensor_cores_mma_three_level_pipeline_gemm<NUM_THREADS, BM, BN, BK, WM, WN>
+        <<<grid_dim, block_dim>>>(M, N, K, alpha, A, B, beta, C);
+}
+
+
 void run_kernel(
     int kernel_num, int M, int N, int K, float alpha, float *A, float *B,
     float beta, float *C, cublasHandle_t handle
@@ -351,6 +375,9 @@ void run_kernel(
         break;
     case 13:
         run_tensor_cores_mma(M, N, K, alpha, A, B, beta, C);
+        break;
+    case 14:
+        run_tensor_cores_mma_three_level_pipeline(M, N, K, alpha, A, B, beta, C);
         break;
     default:
         throw std::invalid_argument("Invalid kernel number.");

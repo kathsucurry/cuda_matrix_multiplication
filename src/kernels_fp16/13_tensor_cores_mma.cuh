@@ -3,8 +3,7 @@
 #include <cuda_bf16.h>
 #include <mma.h>
 
-#include "../kernels_templated/04_vectorize.cuh"
-#include "9_tensor_cores.cuh"
+#include "10_tensor_cores_memcpy_async.cuh"
 
 
 template <uint const NUM_THREADS,
@@ -38,28 +37,29 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
     // layout) depends on the size.
     constexpr uint MMA_M{16};
     constexpr uint MMA_N{8};
-    constexpr uint MMA_K{8};
+    constexpr uint MMA_K{16};
 
     constexpr uint NUM_MMA_M{WM / MMA_M};
     constexpr uint NUM_MMA_N{WN / MMA_N};
 
     // Define register storages; pack in uint32_t to be reinterpreted as .bf16 later.
-    // Multiplicand A: a vector expression containing two .f16x2 registers, with each register
+    // Multiplicand A: a vector expression containing four .f16x2 registers, with each register
     // containing two .bf16 elements from the matrix A.
-    uint32_t A_register[2];
-    // Multiplicand B: a vector expression containing a single .f16x2 register, containing two
-    // .bf16 elements from the matrix B.
-    uint32_t B_register;
+    uint32_t A_register[4];
+    // Multiplicand B: a vector expression containing two .f16x2 registers, with each register
+    // containing two .bf16 elements from the matrix B.
+    uint32_t B_register[2];
     // Accumulator: a vector expression of 4 .f32 registers; initialize with 0s.
     float acc_register[NUM_MMA_M][NUM_MMA_N][4] = {0.0f};
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        vectorize::load_gmem_to_smem<__nv_bfloat16, BM, BN, BK, NUM_THREADS>(
+        wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
         );
+        __pipeline_wait_prior(0);
         __syncthreads();
 
         A += BK;
@@ -73,12 +73,12 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
                     uint32_t shared_A_pointer = static_cast<uint32_t>(
                         __cvta_generic_to_shared(&As[
                             (warp_row_offset + mma_row_idx * MMA_M + (lane_idx % MMA_M)) * BK +
-                            mma_k_offset
+                            mma_k_offset + (lane_idx / MMA_M) * 8
                         ]));
                     asm volatile (
-                        "ldmatrix.sync.aligned.m8n8.x2.shared.b16 "
-                        "{%0, %1}, [%2];"
-                        : "=r"(A_register[0]), "=r"(A_register[1])
+                        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+                        "{%0, %1, %2, %3}, [%4];"
+                        : "=r"(A_register[0]), "=r"(A_register[1]), "=r"(A_register[2]), "=r"(A_register[3])
                         : "r"(shared_A_pointer)
                     );
                 }
@@ -91,24 +91,24 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
                                 (mma_k_offset + (lane_idx % MMA_K)) * BN +
                                 (warp_col_offset + mma_col_idx * MMA_N)]));
                         asm volatile (
-                            "ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 "
-                            "{%0}, [%1];"
-                            : "=r"(B_register)
+                            "ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 "
+                            "{%0, %1}, [%2];"
+                            : "=r"(B_register[0]), "=r"(B_register[1])
                             : "r"(shared_B_pointer)
                         );
                     }
 
                     // Perform MMA.
                     asm volatile (
-                        "mma.sync.aligned.m16n8k8.row.col.f32.bf16.bf16.f32 "
+                        "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
                         "{%0, %1, %2, %3}, "
-                        "{%4, %5}, "
-                        "{%6}, "
-                        "{%7, %8, %9, %10};"
+                        "{%4, %5, %6, %7}, "
+                        "{%8, %9}, "
+                        "{%10, %11, %12, %13};"
                         : "=f"(acc_register[mma_row_idx][mma_col_idx][0]), "=f"(acc_register[mma_row_idx][mma_col_idx][1]),
                           "=f"(acc_register[mma_row_idx][mma_col_idx][2]), "=f"(acc_register[mma_row_idx][mma_col_idx][3])
-                        : "r"(A_register[0]), "r"(A_register[1]),
-                          "r"(B_register),
+                        : "r"(A_register[0]), "r"(A_register[1]), "r"(A_register[2]), "r"(A_register[3]),
+                          "r"(B_register[0]), "r"(B_register[1]),
                           "f"(acc_register[mma_row_idx][mma_col_idx][0]), "f"(acc_register[mma_row_idx][mma_col_idx][1]),
                           "f"(acc_register[mma_row_idx][mma_col_idx][2]), "f"(acc_register[mma_row_idx][mma_col_idx][3])
                     );                 
