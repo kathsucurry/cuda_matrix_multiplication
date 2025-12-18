@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
     
     // Generate matrices.
     // std::vector<uint> const MATRIX_SIZE = {512, 1024, 2048, 4096, 8192};
-    std::vector<uint> const MATRIX_SIZE = {4096};
+    std::vector<uint> const MATRIX_SIZE = {8192};
 
     uint const max_matrix_size = MATRIX_SIZE[MATRIX_SIZE.size() - 1];
     std::cout << "Max matrix size: " << max_matrix_size << std::endl;

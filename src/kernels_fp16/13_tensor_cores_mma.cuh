@@ -54,7 +54,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+        tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As, Bs,
             threadIdx.x

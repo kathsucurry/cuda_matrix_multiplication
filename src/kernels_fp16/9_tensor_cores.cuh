@@ -6,7 +6,7 @@
 #include "../kernels_templated/04_vectorize.cuh"
 
 
-namespace wt_tc {
+namespace tc {
 
 template <uint const BN, uint const BK,
           uint const WMMA_M, uint const WMMA_N, uint const WMMA_K,
@@ -141,12 +141,12 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_gemm(
         B += BK * N;
 
         // Stage 2: dot-product computation.
-        wt_tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+        tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
             As_warp, Bs_warp, a_frag, b_frag, acc_frags);
         __syncthreads();
     }
 
     // Stage 3: epilogue + output stores.
-    wt_tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+    tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
         C, acc_frags, N, alpha, beta);
 }

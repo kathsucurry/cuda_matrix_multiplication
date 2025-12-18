@@ -6,7 +6,7 @@
 
 namespace vectorize {
     
-template <typename T, uint const BM, uint const BN, uint const BK, const uint NUM_THREADS>
+template <typename T, uint const BM, uint const BN, uint const BK, uint const NUM_THREADS>
 __device__ void load_gmem_to_smem(
     T *__restrict__ A, T *__restrict__ B, int N, int K,
     T *__restrict__ As, T *__restrict__ Bs,

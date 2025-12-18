@@ -4,14 +4,16 @@
 #include <cuda_pipeline.h>
 #include <mma.h>
 
-#include "10_tensor_cores_memcpy_async.cuh"
+#include "14_tensor_cores_mma_swizzled.cuh"
 
 
-namespace wt_tc_mma_three_level_pipeline {
+namespace tc_mma_three_level_pipeline {
 
 template <uint const BN, uint const BK,
       uint const MMA_M, uint const MMA_N, uint const MMA_K,
-      uint const NUM_MMA_M, uint const NUM_MMA_N, uint const NUM_MMA_K>
+      uint const NUM_MMA_M, uint const NUM_MMA_N, uint const NUM_MMA_K,
+      uint const SW_A_YYY_MASK, uint const SW_A_SHIFT,
+      uint const SW_B_YYY_MASK, uint const SW_B_SHIFT>
 __device__ __forceinline__ void load_smem_to_regs(
     __nv_bfloat16 *__restrict__ As,
     __nv_bfloat16 *__restrict__ Bs,
@@ -24,11 +26,11 @@ __device__ __forceinline__ void load_smem_to_regs(
         uint const mma_k_offset{mma_k_idx * MMA_K};
         // Load A elements from the shared memory to register.
         for (int mma_row_idx{0}; mma_row_idx < NUM_MMA_M; ++mma_row_idx) {
+            uint32_t const offset{
+                (warp_row_offset + mma_row_idx * MMA_M + (lane_idx % MMA_M)) * BK +
+                mma_k_offset + (lane_idx / MMA_M) * 8};
             uint32_t shared_A_pointer = static_cast<uint32_t>(
-                __cvta_generic_to_shared(&As[
-                    (warp_row_offset + mma_row_idx * MMA_M + (lane_idx % MMA_M)) * BK +
-                    mma_k_offset + (lane_idx / MMA_M) * 8
-                ]));
+                __cvta_generic_to_shared(&As[offset ^ ((offset & SW_A_YYY_MASK) >> SW_A_SHIFT)]));
             asm volatile (
                 "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
                 "{%0, %1, %2, %3}, [%4];"
@@ -40,10 +42,11 @@ __device__ __forceinline__ void load_smem_to_regs(
 
         // Load B elements from the shared memory to register.
         for (int mma_col_idx{0}; mma_col_idx < NUM_MMA_N; ++mma_col_idx) {
+            uint32_t const offset{
+                (mma_k_offset + (lane_idx % MMA_K)) * BN +
+                (warp_col_offset + mma_col_idx * MMA_N)};
             uint32_t shared_B_pointer = static_cast<uint32_t>(
-                __cvta_generic_to_shared(&Bs[
-                    (mma_k_offset + (lane_idx % MMA_K)) * BN +
-                    (warp_col_offset + mma_col_idx * MMA_N)]));
+                __cvta_generic_to_shared(&Bs[offset ^ ((offset & SW_B_YYY_MASK) >> SW_B_SHIFT)]));
             asm volatile (
                 "ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 "
                 "{%0, %1}, [%2];"
@@ -120,6 +123,13 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
     constexpr uint MMA_N{8};
     constexpr uint MMA_K{16};
 
+    constexpr uint SW_A_SHIFT{6 - ilog2<MMA_K>()}; // log2(64) - base
+    // Bits = 32 x 2 / MMA_K groups.
+    constexpr uint SW_A_YYY_MASK{((1 << (ilog2<64 / MMA_K>())) - 1) << (ilog2<MMA_K>() + SW_A_SHIFT)};
+
+    constexpr uint SW_B_SHIFT{6 - ilog2<MMA_N>()};
+    constexpr uint SW_B_YYY_MASK{((1 << (ilog2<64 / MMA_N>())) - 1) << (ilog2<MMA_N>() + SW_B_SHIFT)};
+
     constexpr uint NUM_MMA_M{WM / MMA_M};
     constexpr uint NUM_MMA_N{WN / MMA_N};
     constexpr uint NUM_MMA_K{BK / MMA_K};
@@ -129,7 +139,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
     // Accumulator: a vector expression of 4 .f32 registers; initialize with 0s.
     float acc_register[NUM_MMA_M][NUM_MMA_N][4] = {0.0f};
 
-    wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+    tc_swizzled::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT>(
         A, B, N, K,
         As[0], Bs[0],
         threadIdx.x
@@ -138,7 +148,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
     A += BK;
     B += BK * N;
 
-    wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+    tc_swizzled::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT>(
         A, B, N, K,
         As[1], Bs[1],
         threadIdx.x
@@ -148,8 +158,8 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
     __pipeline_wait_prior(1);
     __syncthreads();
 
-    wt_tc_mma_three_level_pipeline::load_smem_to_regs<
-        BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K>(
+    tc_mma_three_level_pipeline::load_smem_to_regs<
+        BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT>(
             As[0], Bs[0], A_register, B_register, warp_row_offset, warp_col_offset, lane_idx
         );
     
@@ -163,14 +173,14 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
         __syncthreads();
 
         // Load from gmem to smem, replacing the current smem.
-        wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+        tc_swizzled::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT>(
             A, B, N, K,
             As[current], Bs[current],
             threadIdx.x
         );
 
         // Execute the dot product.
-        wt_tc_mma_three_level_pipeline::compute_dot_products<
+        tc_mma_three_level_pipeline::compute_dot_products<
             BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K>(
                 A_register, B_register, acc_register
             );
@@ -179,8 +189,8 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
         __pipeline_wait_prior(1);
         __syncthreads();
 
-        wt_tc_mma_three_level_pipeline::load_smem_to_regs<
-            BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K>(
+        tc_mma_three_level_pipeline::load_smem_to_regs<
+            BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT>(
                 As[current ^ 1], Bs[current ^ 1], A_register, B_register, warp_row_offset, warp_col_offset, lane_idx
             );
 
@@ -189,19 +199,19 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_three_level_pipe
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_tc_mma_three_level_pipeline::compute_dot_products<
+    tc_mma_three_level_pipeline::compute_dot_products<
         BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K>(
             A_register, B_register, acc_register
         );
     
-    wt_tc_mma_three_level_pipeline::load_smem_to_regs<
-        BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K>(
+    tc_mma_three_level_pipeline::load_smem_to_regs<
+        BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT>(
             As[current ^ 1], Bs[current ^ 1], A_register, B_register, warp_row_offset, warp_col_offset, lane_idx
         );
 
     __syncthreads();
     
-    wt_tc_mma_three_level_pipeline::compute_dot_products<
+    tc_mma_three_level_pipeline::compute_dot_products<
         BN, BK, MMA_M, MMA_N, MMA_K, NUM_MMA_M, NUM_MMA_N, NUM_MMA_K>(
             A_register, B_register, acc_register
         );

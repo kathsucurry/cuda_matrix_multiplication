@@ -7,9 +7,9 @@
 #include "9_tensor_cores.cuh"
 
 
-namespace wt_tc_memcpy_async {
+namespace tc_memcpy_async {
     
-template <uint const BM, uint const BN, uint const BK, const uint NUM_THREADS, const uint FACTOR>
+template <uint const BM, uint const BN, uint const BK, uint const NUM_THREADS, uint const FACTOR>
 __device__ __forceinline__ void load_gmem_to_smem(
     __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, int N, int K,
     __nv_bfloat16 *__restrict__ As, __nv_bfloat16 *__restrict__ Bs,
@@ -92,7 +92,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_memcpy_async_gemm(
 
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
-        wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+        tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As, Bs,
             threadIdx.x
@@ -105,12 +105,12 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_memcpy_async_gemm(
         __syncthreads();
 
         // Stage 2: dot-product computation.
-        wt_tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+        tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
             As_warp, Bs_warp, a_frag, b_frag, acc_frags);
         __syncthreads();
     }
 
     // Stage 3: epilogue + output stores.
-    wt_tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+    tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
         C, acc_frags, N, alpha, beta);
 }

@@ -57,7 +57,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
     int8_t current{0};
 
     // Stage 1: shared-memory stores.
-    wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+    tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
         A, B, N, K,
         As[current], Bs[current],
         threadIdx.x
@@ -67,7 +67,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
         A += BK;
         B += BK * N;
 
-        wt_tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
+        tc_memcpy_async::load_gmem_to_smem<BM, BN, BK, NUM_THREADS, 3>(
             A, B, N, K,
             As[current ^ 1], Bs[current ^ 1],
             threadIdx.x
@@ -76,7 +76,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
         __syncthreads();
 
         // Stage 2: dot-product computation.
-        wt_tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+        tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
             &As[current][As_offset], &Bs[current][Bs_offset], a_frag, b_frag, acc_frags);
         __syncthreads();
 
@@ -85,10 +85,10 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_double_buffering_gem
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    wt_tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+    tc::compute_dot_products<BN, BK, WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
         &As[current][As_offset], &Bs[current][Bs_offset], a_frag, b_frag, acc_frags);
 
     // Stage 3: epilogue + output stores.
-    wt_tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
+    tc::run_epilogue<WMMA_M, WMMA_N, WMMA_K, NUM_WMMA_M, NUM_WMMA_N>(
         C, acc_frags, N, alpha, beta);
 }
