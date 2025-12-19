@@ -20,5 +20,5 @@
 #include "kernels_fp16/12_tensor_cores_three_level_pipeline.cuh"
 #include "kernels_fp16/13_tensor_cores_mma.cuh"
 #include "kernels_fp16/14_tensor_cores_mma_swizzled.cuh"
-#include "kernels_fp16/14_tensor_cores_mma_three_level_pipeline.cuh"
+#include "kernels_fp16/15_tensor_cores_mma_three_level_pipeline.cuh"
 

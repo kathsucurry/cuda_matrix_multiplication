@@ -176,7 +176,7 @@ void measure_performance(
             CHECK_CUDA_ERROR(cudaMemcpy(C_ref, C_ref_d, sizeof(float) * M * N, cudaMemcpyDeviceToHost));
             CHECK_CUDA_ERROR(cudaMemcpy(C, C_d, sizeof(float) * M * N, cudaMemcpyDeviceToHost));
 
-            if (!verify_matrix(C_ref, C, M * N)) {
+            if (!verify_matrix<T>(C_ref, C, M * N)) {
                 std::cerr << "The kernel function implementation is not correct compared to cuBLAS results." << std::endl;
                 exit(EXIT_FAILURE);
             }

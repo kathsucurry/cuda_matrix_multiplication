@@ -40,21 +40,18 @@ void randomize_matrix(T *matrix, size_t N) {
 }
 
 template <typename T>
-bool verify_matrix(T *matrix_1, T *matrix_2, size_t N) {
-    using traits = float_traits<T>;
-    
+bool verify_matrix(float *matrix_1, float *matrix_2, size_t N) {
     double diff{0.0};
     double eps{::cuda::std::is_same_v<T, float> ? EPS_FP32 : EPS_FP16};
 
-
     for (size_t i{0}; i < N; ++i) {
         diff = std::fabs(
-            static_cast<double>(traits::to_compute(matrix_1[i])) -
-            static_cast<double>(traits::to_compute(matrix_2[i])));
+            static_cast<double>(matrix_1[i]) -
+            static_cast<double>(matrix_2[i]));
         if (isnan(diff) || diff > eps) {
             printf(
                 "Divergence encountered with at %zu with diff %5.4f; expected: %5.4f but actual: %5.4f\n",
-                i, diff, traits::to_compute(matrix_1[i]), traits::to_compute(matrix_2[i]));
+                i, diff, matrix_1[i], matrix_2[i]);
             return false;
         }
     }    
