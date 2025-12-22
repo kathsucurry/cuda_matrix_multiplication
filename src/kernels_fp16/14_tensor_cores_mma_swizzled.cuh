@@ -8,7 +8,6 @@ namespace tc_swizzled {
     
 template <uint const BM, uint const BN, uint const BK,
           uint const NUM_THREADS, uint const FACTOR,
-          uint const SW_A_YYY_MASK, uint const SW_A_SHIFT,
           uint const SW_B_YYY_MASK, uint const SW_B_SHIFT>
 __device__ __forceinline__ void load_gmem_to_smem(
     __nv_bfloat16 *__restrict__ A, __nv_bfloat16 *__restrict__ B, int N, int K,
@@ -26,7 +25,7 @@ __device__ __forceinline__ void load_gmem_to_smem(
     for (int A_load_offset{0}; A_load_offset < BM; A_load_offset += stride_A) {
         uint const offset{(A_block_row_idx + A_load_offset) * BK + A_block_col_idx};
         __pipeline_memcpy_async(
-            &As[offset ^ ((offset & SW_A_YYY_MASK) >> SW_A_SHIFT)],
+            &As[offset],
             &A[(A_block_row_idx + A_load_offset) * K + A_block_col_idx],
             8 * sizeof(__nv_bfloat16)
         );
@@ -79,11 +78,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_swizzled_gemm(
     constexpr uint MMA_N{8};
     constexpr uint MMA_K{16};
 
-    constexpr uint SW_A_SHIFT{6 - ilog2<MMA_K>()}; // log2(64) - base
-    // Bits = 32 x 2 / MMA_K groups.
-    constexpr uint SW_A_YYY_MASK{((1 << (ilog2<64 / MMA_K>())) - 1) << (ilog2<MMA_K>() + SW_A_SHIFT)};
-
-    constexpr uint SW_B_SHIFT{6 - ilog2<MMA_N>()};
+    constexpr uint SW_B_SHIFT{6 - ilog2<MMA_N>()}; // log2(64) - base
     constexpr uint SW_B_YYY_MASK{((1 << (ilog2<64 / MMA_N>())) - 1) << (ilog2<MMA_N>() + SW_B_SHIFT)};
 
     constexpr uint NUM_MMA_M{WM / MMA_M};
@@ -102,7 +97,7 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_swizzled_gemm(
     for (int k_offset{0}; k_offset < K; k_offset += BK) {
         // Stage 1: shared-memory stores.
         tc_swizzled::load_gmem_to_smem<
-            BM, BN, BK, NUM_THREADS, 3, SW_A_YYY_MASK, SW_A_SHIFT, SW_B_YYY_MASK, SW_B_SHIFT
+            BM, BN, BK, NUM_THREADS, 3, SW_B_YYY_MASK, SW_B_SHIFT
         >(
             A, B, N, K,
             As, Bs,
@@ -119,11 +114,11 @@ __global__ void __launch_bounds__(NUM_THREADS) tensor_cores_mma_swizzled_gemm(
             // Load A elements from the shared memory to register.
             for (int mma_row_idx{0}; mma_row_idx < NUM_MMA_M; ++mma_row_idx) {
                 {
-                    uint const offset{
-                            (warp_row_offset + mma_row_idx * MMA_M + (lane_idx % MMA_M)) * BK +
-                            mma_k_offset + (lane_idx / MMA_M) * 8};
                     uint32_t shared_A_pointer = static_cast<uint32_t>(
-                        __cvta_generic_to_shared(&As[offset ^ ((offset & SW_A_YYY_MASK) >> SW_A_SHIFT)]));
+                        __cvta_generic_to_shared(&As[
+                            (warp_row_offset + mma_row_idx * MMA_M + (lane_idx % MMA_M)) * BK +
+                            mma_k_offset + (lane_idx / MMA_M) * 8
+                        ]));
                     asm volatile (
                         "ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
                         "{%0, %1, %2, %3}, [%4];"
